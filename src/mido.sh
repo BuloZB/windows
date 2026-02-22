@@ -182,6 +182,7 @@ download_windows_eval() {
   local desc="$3"
   local filter=""
   local culture=""
+  local compare=""
   local language=""
   local user_agent=""
   local enterprise_type=""
@@ -274,8 +275,6 @@ download_windows_eval() {
           fi ;;
         "arm64" )
           iso_download_link=$(echo "$iso_download_links" | head -n 2 | tail -n 1) ;;
-        * )
-          error "Invalid platform specified, value \"$PLATFORM\" is not recognized!" && return 1 ;;
       esac ;;
     "enterprise" )
       case "${PLATFORM,,}" in
@@ -287,16 +286,16 @@ download_windows_eval() {
           fi ;;
         "arm64" )
           iso_download_link=$(echo "$iso_download_links" | head -n 2 | tail -n 1) ;;
-        * )
-          error "Invalid platform specified, value \"$PLATFORM\" is not recognized!" && return 1 ;;
       esac ;;
     "server" )
-      iso_download_link=$(echo "$iso_download_links" | head -n 1) ;;
+      case "${PLATFORM,,}" in
+        "x64" )
+          iso_download_link=$(echo "$iso_download_links" | head -n 1) ;;
+      esac ;;
     * )
       error "Invalid type specified, value \"$enterprise_type\" is not recognized!" && return 1 ;;
   esac
 
-  [[ "$DEBUG" == [Yy1]* ]] && echo "Found download link: $iso_download_link"
   [ -z "$iso_download_link" ] && error "Could not parse download link from page!" && return 1
 
   # Follow redirect so proceeding log message is useful
@@ -307,6 +306,30 @@ download_windows_eval() {
     handle_curl_error "$?" "Microsoft"
     return $?
   }
+
+  case "${PLATFORM,,}" in
+    "x64" )
+      if [[ "${iso_download_link,,}" != *"x64"* ]]; then
+        echo "Found download link: $iso_download_link"
+        error "Download link is for the wrong platform? Please report this at $SUPPORT/issues"
+        return 1
+      fi ;;
+    "arm64" )
+      if [[ "${iso_download_link,,}" != *"a64"* && "${iso_download_link,,}" != *"arm64"* ]]; then
+        if [[ "$DEBUG" == [Yy1]* ]]; then
+          echo "Found download link: $iso_download_link"
+          echo "Link for ARM platform currently not available!"
+        fi
+        return 1
+      fi ;;
+  esac
+
+  if [[ "$DEBUG" == [Yy1]* && "$VERIFY" == [Yy1]* && "${lang,,}" == "en"* ]]; then
+    compare=$(getMido "$id" "$lang" "")
+    if [[ "${iso_download_link,,}" != "${compare,,}" ]]; then
+      echo "Retrieved link does not match the fixed link: $compare"
+    fi
+  fi
 
   MIDO_URL="$iso_download_link"
   return 0
@@ -464,8 +487,11 @@ getESD() {
   info "$msg" && html "$msg"
 
   rm -rf "$dir"
-  mkdir -p "$dir"
 
+  if ! makeDir "$dir"; then
+    error "Failed to create directory \"$dir\" !" && return 1
+  fi
+  
   local xFile="products.xml"
   local eFile="esd_edition.xml"
   local fFile="products_filter.xml"

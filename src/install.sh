@@ -22,7 +22,11 @@ backup () {
 
   fi
 
-  mkdir -p "$root"
+  if ! makeDir "$root"; then
+    error "Failed to create directory \"$root\" !"
+    return 1
+  fi
+
   local folder="$name"
   local dir="$root/$folder"
 
@@ -34,7 +38,11 @@ backup () {
   done
 
   rm -rf "$dir"
-  mkdir -p "$dir"
+
+  if ! makeDir "$dir"; then
+    error "Failed to create directory \"$dir\" !"
+    return 1
+  fi
 
   [ -f "$iso" ] && mv -f "$iso" "$dir/"
   find "$STORAGE" -maxdepth 1 -type f -iname 'data.*' -not -iname '*.iso' -exec mv -n {} "$dir/" \;
@@ -127,8 +135,8 @@ startInstall() {
     if [[ "${VERSION,,}" == "http"* ]]; then
 
       file=$(basename "${VERSION%%\?*}")
-      : "${file//+/ }"; printf -v file '%b' "${_//%/\\x}"
-      file=$(echo "$file" | sed -e 's/[^A-Za-z0-9._-]/_/g')
+      printf -v file '%b' "${file//%/\\x}"
+      file="${file//[!A-Za-z0-9._-]/_}"
 
     else
 
@@ -155,7 +163,9 @@ startInstall() {
     ! backup "" && error "Backup failed!"
   fi
 
-  mkdir -p "$TMP"
+  if ! makeDir "$TMP"; then
+    error "Failed to create directory \"$TMP\" !"
+  fi
 
   if [ -z "$CUSTOM" ]; then
 
@@ -177,6 +187,20 @@ startInstall() {
   return 0
 }
 
+writeFile() {
+
+  local txt="$1"
+  local path="$2"
+
+  echo "$txt" >"$path"
+
+  if ! setOwner "$path"; then
+    error "Failed to set the owner for \"$path\" !"
+  fi
+
+  return 0
+}
+
 finishInstall() {
 
   local iso="$1"
@@ -187,6 +211,10 @@ finishInstall() {
     error "Failed to find ISO file: $iso" && return 1
   fi
 
+  if [[ "$iso" == "$STORAGE/"* ]]; then
+    ! setOwner "$iso" && error "Failed to set the owner for \"$iso\" !"
+  fi
+
   if [[ "$aborted" != [Yy1]* ]]; then
     # Mark ISO as prepared via magic byte
     byte="16" && [[ "$MANUAL" == [Yy1]* ]] && byte="17"
@@ -195,56 +223,68 @@ finishInstall() {
     fi
   fi
 
-  cp -f /run/version "$STORAGE/windows.ver"
+  local file="$STORAGE/windows.ver"
+  cp -f /run/version "$file"
+  ! setOwner "$file" && error "Failed to set the owner for \"$file\" !"
 
   if [[ "$iso" == "$STORAGE/"* ]]; then
     if [[ "$aborted" != [Yy1]* ]] || [ -z "$CUSTOM" ]; then
       base=$(basename "$iso")
-      echo "$base" > "$STORAGE/windows.base"
+      file="$STORAGE/windows.base"
+      writeFile "$base" "$file"
     fi
   fi
 
   if [[ "${PLATFORM,,}" == "x64" ]]; then
     if [[ "${BOOT_MODE,,}" == "windows_legacy" ]]; then
-      echo "$BOOT_MODE" > "$STORAGE/windows.mode"
+      file="$STORAGE/windows.mode"
+      writeFile "$BOOT_MODE" "$file"
       if [[ "${MACHINE,,}" != "q35" ]]; then
-        echo "$MACHINE" > "$STORAGE/windows.old"
+        file="$STORAGE/windows.old"
+        writeFile "$MACHINE" "$file"
       fi
     else
       # Enable secure boot + TPM on manual installs as Win11 requires
       if [[ "$MANUAL" == [Yy1]* || "$aborted" == [Yy1]* ]]; then
         if [[ "${DETECTED,,}" == "win11"* ]]; then
           BOOT_MODE="windows_secure"
-          echo "$BOOT_MODE" > "$STORAGE/windows.mode"
+          file="$STORAGE/windows.mode"
+          writeFile "$BOOT_MODE" "$file"
         fi
       fi
       # Enable secure boot on multi-socket systems to workaround freeze
       if [ -n "$SOCKETS" ] && [[ "$SOCKETS" != "1" ]]; then
         BOOT_MODE="windows_secure"
-        echo "$BOOT_MODE" > "$STORAGE/windows.mode"
+        file="$STORAGE/windows.mode"
+        writeFile "$BOOT_MODE" "$file"
       fi
     fi
   fi
 
   if [ -n "${ARGS:-}" ]; then
     ARGUMENTS="$ARGS ${ARGUMENTS:-}"
-    echo "$ARGS" > "$STORAGE/windows.args"
+    file="$STORAGE/windows.args"
+    writeFile "$ARGS" "$file"
   fi
 
   if [ -n "${VGA:-}" ] && [[ "${VGA:-}" != "virtio"* ]]; then
-    echo "$VGA" > "$STORAGE/windows.vga"
+    file="$STORAGE/windows.vga"
+    writeFile "$VGA" "$file"
   fi
 
   if [ -n "${USB:-}" ] && [[ "${USB:-}" != "qemu-xhci"* ]]; then
-    echo "$USB" > "$STORAGE/windows.usb"
+    file="$STORAGE/windows.usb"
+    writeFile "$USB" "$file"
   fi
 
   if [ -n "${DISK_TYPE:-}" ] && [[ "${DISK_TYPE:-}" != "scsi" ]]; then
-    echo "$DISK_TYPE" > "$STORAGE/windows.type"
+    file="$STORAGE/windows.type"
+    writeFile "$DISK_TYPE" "$file"
   fi
 
   if [ -n "${ADAPTER:-}" ] && [[ "${ADAPTER:-}" != "virtio-net-pci" ]]; then
-    echo "$ADAPTER" > "$STORAGE/windows.net"
+    file="$STORAGE/windows.net"
+    writeFile "$ADAPTER" "$file"
   fi
 
   rm -rf "$TMP"
@@ -338,19 +378,24 @@ extractESD() {
   local dir="$2"
   local version="$3"
   local desc="$4"
-  local size size_gb space space_gb desc
+  local size size_gb sizes space space_gb
+  local desc total total1 total2 total3 total4
+  local imageIndex links links1 links2 links3 links4
 
-  local msg="Extracting $desc bootdisk..."
-  info "$msg" && html "$msg"
+  local msg="Extracting $desc bootdisk"
+  info "$msg..." && html "$msg..."
 
   if [ "$(stat -c%s "$iso")" -lt 100000000 ]; then
     error "Invalid ESD file: Size is smaller than 100 MB" && return 1
   fi
 
   rm -rf "$dir"
-  mkdir -p "$dir"
 
-  size=16106127360
+  if ! makeDir "$dir"; then
+    error "Failed to create directory \"$dir\" !" && return 1
+  fi
+
+  size=9606127360
   size_gb=$(formatBytes "$size")
   space=$(df --output=avail -B 1 "$dir" | tail -n 1)
   space_gb=$(formatBytes "$space")
@@ -366,29 +411,59 @@ extractESD() {
     error "Cannot read the image count in ESD file!" && return 1
   fi
 
-  wimlib-imagex apply "$iso" 1 "$dir" --quiet 2>/dev/null || {
+  sizes=$(wimlib-imagex info "$iso" | grep "Total Bytes:")
+  links=$(wimlib-imagex info "$iso" | grep "Hard Link Bytes:")
+
+  total1=$(awk "NR==1{ print; }" <<< "$sizes" | cut -d':' -f2 | sed 's/^ *//')
+  links1=$(awk "NR==1{ print; }" <<< "$links" | cut -d':' -f2 | sed 's/^ *//')
+  total=$(( total1 - links1 ))
+
+  total3=$(awk "NR==3{ print; }" <<< "$sizes" | cut -d':' -f2 | sed 's/^ *//')
+  links3=$(awk "NR==3{ print; }" <<< "$links" | cut -d':' -f2 | sed 's/^ *//')
+  total3=$(( total3 - links3 ))
+  total3=$(( total3 + 60000000 ))
+
+  /run/progress.sh "$dir" "$total" "$msg ([P])..." &
+
+  imageIndex="1"
+  wimlib-imagex apply "$iso" "$imageIndex" "$dir" --quiet 2>/dev/null || {
     retVal=$?
-    error "Extracting $desc bootdisk failed" && return $retVal
+    fKill "progress.sh"
+    error "Extracting $desc bootdisk failed ($retVal)" && return 1
   }
+
+  fKill "progress.sh"
 
   local bootWimFile="$dir/sources/boot.wim"
   local installWimFile="$dir/sources/install.wim"
 
-  local msg="Extracting $desc environment..."
-  info "$msg" && html "$msg"
+  local msg="Extracting $desc environment"
+  info "$msg..." && html "$msg..."
 
-  wimlib-imagex export "$iso" 2 "$bootWimFile" --compress=none --quiet || {
+  imageIndex="2"
+  /run/progress.sh "$bootWimFile" "$total3" "$msg ([P])..." &
+
+  wimlib-imagex export "$iso" "$imageIndex" "$bootWimFile" --compress=none --quiet || {
     retVal=$?
-    error "Adding WinPE failed" && return ${retVal}
+    fKill "progress.sh"
+    error "Adding WinPE failed ($retVal)" && return 1
   }
 
-  local msg="Extracting $desc setup..."
-  info "$msg" && html "$msg"
+  fKill "progress.sh"
 
-  wimlib-imagex export "$iso" 3 "$bootWimFile" --compress=none --boot --quiet || {
+  local msg="Extracting $desc setup"
+  info "$msg..."
+
+  imageIndex="3"
+  /run/progress.sh "$bootWimFile" "$total3" "$msg ([P])..." &
+
+  wimlib-imagex export "$iso" "$imageIndex" "$bootWimFile" --compress=none --boot --quiet || {
    retVal=$?
-   error "Adding Windows Setup failed" && return ${retVal}
+   fKill "progress.sh"
+   error "Adding Windows Setup failed ($retVal)" && return 1
   }
+
+  fKill "progress.sh"
 
   if [[ "${PLATFORM,,}" == "x64" ]]; then
     LABEL="CCCOMA_X64FRE_EN-US_DV9"
@@ -396,10 +471,10 @@ extractESD() {
     LABEL="CPBA_A64FRE_EN-US_DV9"
   fi
 
-  local msg="Extracting $desc image..."
-  info "$msg" && html "$msg"
+  local msg="Extracting $desc image"
+  info "$msg..." && html "$msg..."
 
-  local edition imageIndex imageEdition
+  local edition imageEdition
   edition=$(getCatalog "$version" "name")
 
   if [ -z "$edition" ]; then
@@ -407,15 +482,27 @@ extractESD() {
   fi
 
   for (( imageIndex=4; imageIndex<=esdImageCount; imageIndex++ )); do
-    imageEdition=$(wimlib-imagex info "$iso" ${imageIndex} | grep '^Description:' | sed 's/Description:[ \t]*//')
+
+    imageEdition=$(wimlib-imagex info "$iso" "$imageIndex" | grep '^Description:' | sed 's/Description:[ \t]*//')
     [[ "${imageEdition,,}" != "${edition,,}" ]] && continue
-    wimlib-imagex export "$iso" ${imageIndex} "$installWimFile" --compress=LZMS --chunk-size 128K --quiet || {
+
+    total4=$(du -sb "$iso" | cut -f1)
+    total4=$(( total4 + 3000000 ))
+
+    /run/progress.sh "$installWimFile" "$total4" "$msg ([P])..." &
+
+    wimlib-imagex export "$iso" "$imageIndex" "$installWimFile" --compress=LZMS --chunk-size 128K --quiet || {
       retVal=$?
-      error "Addition of $imageIndex to the $desc image failed" && return $retVal
+      fKill "progress.sh"
+      error "Addition of $imageIndex to the $desc image failed ($retVal)" && return 1
     }
+
+    fKill "progress.sh"
     return 0
+
   done
 
+  fKill "progress.sh"
   error "Failed to find product '$edition' in install.wim!" && return 1
 }
 
@@ -439,18 +526,21 @@ extractImage() {
     return 1
   fi
 
-  local msg="Extracting $desc image..."
-  info "$msg" && html "$msg"
+  local msg="Extracting $desc image"
+  info "$msg..." && html "$msg..."
 
   rm -rf "$dir"
-  mkdir -p "$dir"
+
+  if ! makeDir "$dir"; then
+    error "Failed to create directory \"$dir\" !" && return 1
+  fi
 
   size=$(stat -c%s "$iso")
   size_gb=$(formatBytes "$size")
   space=$(df --output=avail -B 1 "$dir" | tail -n 1)
   space_gb=$(formatBytes "$space")
 
-  if ((size<100000000)); then
+  if (( size < 100000000 )); then
     error "Invalid ISO file: Size is smaller than 100 MB" && return 1
   fi
 
@@ -459,10 +549,14 @@ extractImage() {
   fi
 
   rm -rf "$dir"
+  /run/progress.sh "$dir" "$size" "$msg ([P])..." &
 
   if ! 7z x "$iso" -o"$dir" > /dev/null; then
+    fKill "progress.sh"
     error "Failed to extract ISO file: $iso" && return 1
   fi
+
+  fKill "progress.sh"
 
   if [[ "${UNPACK:-}" != [Yy1]* ]]; then
 
@@ -755,13 +849,10 @@ updateXML() {
   local language="$2"
   local culture region user admin pass keyboard
 
-  if [ -n "${VM_NET_IP:-}" ]; then
-    sed -i "s/ 20.20.20.1 / ${VM_NET_IP%.*}.1 /g" "$asset"
-  fi
-
   [ -z "$HEIGHT" ] && HEIGHT="720"
   [ -z "$WIDTH" ] && WIDTH="1280"
 
+  sed -i "s/>Windows for Docker</>$APP for $ENGINE</g" "$asset"
   sed -i "s/<VerticalResolution>1080<\/VerticalResolution>/<VerticalResolution>$HEIGHT<\/VerticalResolution>/g" "$asset"
   sed -i "s/<HorizontalResolution>1920<\/HorizontalResolution>/<HorizontalResolution>$WIDTH<\/HorizontalResolution>/g" "$asset"
 
@@ -1079,8 +1170,8 @@ buildImage() {
 
   desc=$(printVersion "$DETECTED" "ISO")
 
-  local msg="Building $desc image..."
-  info "$msg" && html "$msg"
+  local msg="Building $desc image"
+  info "$msg..." && html "$msg..."
 
   [ -z "$LABEL" ] && LABEL="Windows"
 
@@ -1096,6 +1187,8 @@ buildImage() {
   if (( size > space )); then
     error "Not enough free space in $STORAGE, have $space_gb available but need at least $size_gb." && return 1
   fi
+
+  /run/progress.sh "$out" "$size" "$msg ([P])..." &
 
   if [[ "${BOOT_MODE,,}" != "windows_legacy" ]]; then
 
@@ -1117,6 +1210,8 @@ buildImage() {
 
   fi
 
+  fKill "progress.sh"
+
   if [ -n "$failed" ]; then
     [ -s "$log" ] && echo "$(<"$log")"
     error "Failed to build image!" && return 1
@@ -1129,6 +1224,8 @@ buildImage() {
   [[ "$error" != "$hide" ]] && echo "$error"
 
   mv -f "$out" "$BOOT" || return 1
+  ! setOwner "$BOOT" && error "Failed to set the owner for \"$BOOT\" !"
+
   return 0
 }
 

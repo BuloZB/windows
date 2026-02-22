@@ -722,13 +722,14 @@ getMido() {
 
   case "${id,,}" in
     "win11x64" )
-      size=5819484160
-      sum="b56b911bf18a2ceaeb3904d87e7c770bdf92d3099599d61ac2497b91bf190b11"
+      size=7736125440
+      sum="d141f6030fed50f75e2b03e1eb2e53646c4b21e5386047cb860af5223f102a32"
+      url="https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26200.6584.250915-1905.25h2_ge_release_svc_refresh_CLIENT_CONSUMER_x64FRE_en-us.iso"
       ;;
     "win11x64-enterprise-eval" )
-      size=5387960320
-      sum="755a90d43e826a74b9e1932a34788b898e028272439b777e5593dee8d53622ae"
-      url="https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26100.1.240331-1435.ge_release_CLIENTENTERPRISEEVAL_OEMRET_A64FRE_en-us.iso"
+      size=7092807680
+      sum="a61adeab895ef5a4db436e0a7011c92a2ff17bb0357f58b13bbc4062e535e7b9"
+      url="https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26200.6584.250915-1905.25h2_ge_release_svc_refresh_CLIENTENTERPRISEEVAL_OEMRET_x64FRE_en-us.iso"
       ;;
     "win11x64-enterprise-iot-eval" | "win11x64-enterprise-ltsc-eval" )
       size=5060020224
@@ -856,14 +857,14 @@ getLink1() {
       url="8.x/8.1/en_windows_8.1_enterprise_with_update_x64_dvd_6054382.iso"
       ;;
     "win2025" | "win2025-eval" )
-      size=6786627584
-      sum="bf3ef0849c7cb5e818e1035b7466d206af5aa227ace1a3f4b0de2bf00d2e2144"
-      url="server/2025/en-us_windows_server_2025_updated_april_2025_x64_dvd_ea86301d.iso"
+      size=7571058688
+      sum="d273d0a85565ffbc06a3d46313f619103e2830a3373306ddbb9a08b8824f509d"
+      url="server/2025/en-us_windows_server_2025_updated_oct_2025_x64_dvd_6c0c5aa8.iso"
       ;;
     "win2022" | "win2022-eval" )
-      size=6005706752
-      sum="cea2cb2c09de9910c236e64eae3a801c55e9c77ec25e8d81585e3a4581d24bfb"
-      url="server/2022/en-us_windows_server_2022_updated_april_2025_x64_dvd_3f755ec1.iso"
+      size=6023239680
+      sum="5d6d91efa972cbdd6701d78db1dcf6a34c7024ca931c1718e7cb3d0c6dd54e88"
+      url="server/2022/en-us_windows_server_2022_updated_oct_2025_x64_dvd_26e9af36.iso"
       ;;
     "win2019" | "win2019-eval" )
       size=5575774208
@@ -1107,14 +1108,14 @@ getLink4() {
       url="nano11_25h2/nano11%2025h2.iso"
       ;;
     "core11" )
-      size=2159738880
-      sum="78f0f44444ff95b97125b43e560a72e0d6ce0a665cf9f5573bf268191e5510c1"
-      url="tiny-11-core-x-64-beta-1/tiny11%20core%20x64%20beta%201.iso"
+      size=3176654848
+      sum="29c055fcfb7b089abd9e007e7abe4bb82c70a03aac9d65e56a38b87ab32d04d2"
+      url="tiny11_25H2/tiny11core_25H2_Oct25.iso"
       ;;
     "tiny11" )
-      size=3788177408
-      sum="a028800a91addc35d8ae22dce7459b67330f7d69d2f11c70f53c0fdffa5b4280"
-      url="tiny11-2311/tiny11%202311%20x64.iso"
+      size=5514559488
+      sum="92484f2b7f707e42383294402a9eabbadeaa5ede80ac633390ae7f3537e36275"
+      url="tiny11_25H2/tiny11_25H2_Oct25.iso"
       ;;
     "tiny10" )
       size=3839819776
@@ -1122,9 +1123,9 @@ getLink4() {
       url="tiny-10-23-h2/tiny10%20x64%2023h2.iso"
       ;;
     "win11x64" )
-      size=5819484160
-      sum="b56b911bf18a2ceaeb3904d87e7c770bdf92d3099599d61ac2497b91bf190b11"
-      url="windows-11-24h2-x64/Windows%2011%2024H2%20x64.iso"
+      size=7736125440
+      sum="d141f6030fed50f75e2b03e1eb2e53646c4b21e5386047cb860af5223f102a32"
+      url="W11x64_26200.6584/26200.6584.250915-1905.25h2_ge_release_svc_refresh_CLIENT_CONSUMER_x64FRE_en-us.iso"
       ;;
     "win11x64-enterprise" | "win11x64-enterprise-eval" )
       size=6209064960
@@ -1583,9 +1584,6 @@ prepareInstall() {
   [ -n "$PASSWORD" ] && password=$(echo "$PASSWORD" | sed 's/"//g')
   [ -z "$password" ] && password="admin"
 
-  local ip="20.20.20.1"
-  [ -n "${VM_NET_IP:-}" ] && ip="${VM_NET_IP%.*}.1"
-
   find "$target" -maxdepth 1 -type f -iname winnt.sif -exec rm {} \;
 
   {       echo "[Data]"
@@ -1622,7 +1620,7 @@ prepareInstall() {
           echo "[UserData]"
           echo "    FullName=\"$username\""
           echo "    ComputerName=\"*\""
-          echo "    OrgName=\"Windows for Docker\""
+          echo "    OrgName=\"$APP for $ENGINE\""
           echo "    $KEY"
           echo ""
           echo "[Identification]"
@@ -1768,19 +1766,18 @@ prepareInstall() {
           echo ""
           echo "Call Domain.MoveHere(LocalAdminADsPath, \"$username\")"
           echo ""
-          echo "With (CreateObject(\"Scripting.FileSystemObject\"))"
-          echo "  SysRoot = WshShell.ExpandEnvironmentStrings(\"%SystemRoot%\")"
-          echo "  Set oFile = .OpenTextFile(SysRoot & \"\system32\drivers\etc\hosts\", 8, true)"
-          echo "  oFile.Write(\"$ip      host.lan\")"
-          echo "  oFile.Close()"
-          echo "  Set oFile = Nothing"
+          echo "Set oLink = WshShell.CreateShortcut(WshShell.SpecialFolders(\"Desktop\") & \"\\Shared.lnk\")"
+          echo "With oLink"
+          echo "  .TargetPath = \"\\\\host.lan\\Data\""
+          echo "  .Save"
           echo "End With"
+          echo "Set oLink = Nothing"
           echo ""
-  } | unix2dos > "$dir/\$OEM\$/admin.vbs"
+  } | unix2dos > "$dir/\$OEM\$/install.vbs"
 
   {       echo "[COMMANDS]"
           echo "\"REGEDIT /s install.reg\""
-          echo "\"Wscript admin.vbs\""
+          echo "\"Wscript install.vbs\""
           echo ""
   } | unix2dos > "$dir/\$OEM\$/cmdlines.txt"
 
@@ -1918,16 +1915,16 @@ setMachine() {
       USB="no"
       VGA="cirrus"
       DISK_TYPE="auto"
-      ADAPTER="rtl8139"
       MACHINE="pc-i440fx-2.4"
-      BOOT_MODE="windows_legacy" ;;
+      BOOT_MODE="windows_legacy"
+      [ -z "${ADAPTER:-}" ] && ADAPTER="pcnet" ;;
     "win2k"* )
       VGA="cirrus"
       MACHINE="pc"
       USB="pci-ohci"
       DISK_TYPE="auto"
-      ADAPTER="rtl8139"
-      BOOT_MODE="windows_legacy" ;;
+      BOOT_MODE="windows_legacy"
+      [ -z "${ADAPTER:-}" ] && ADAPTER="rtl8139" ;;
     "winxp"* | "win2003"* )
       DISK_TYPE="blk"
       BOOT_MODE="windows_legacy" ;;
