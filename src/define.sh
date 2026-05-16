@@ -276,7 +276,7 @@ getLanguage() {
       lang="Latvian"
       desc="$lang"
       culture="lv-LV" ;;
-    "nb" | "nb-"* |"nn" | "nn-"* | "no" | "no-"* )
+    "nb" | "nb-"* | "nn" | "nn-"* | "no" | "no-"* )
       short="no"
       lang="Norwegian"
       desc="$lang"
@@ -722,8 +722,8 @@ getMido() {
 
   case "${id,,}" in
     "win11x64" )
-      size=7736125440
-      sum="d141f6030fed50f75e2b03e1eb2e53646c4b21e5386047cb860af5223f102a32"
+      size=8471603200
+      sum="768984706b909479417b2368438909440f2967ff05c6a9195ed2667254e465e3"
       url="https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26200.6584.250915-1905.25h2_ge_release_svc_refresh_CLIENT_CONSUMER_x64FRE_en-us.iso"
       ;;
     "win11x64-enterprise-eval" )
@@ -734,11 +734,7 @@ getMido() {
     "win11x64-enterprise-iot-eval" | "win11x64-enterprise-ltsc-eval" )
       size=5060020224
       sum="2cee70bd183df42b92a2e0da08cc2bb7a2a9ce3a3841955a012c0f77aeb3cb29"
-      url="https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26100.1.240331-1435.ge_release_CLIENT_IOT_LTSC_EVAL_x64FRE_en-us.iso"
-      ;;
-    "win10x64" )
-      size=6140975104
-      sum="a6f470ca6d331eb353b815c043e327a347f594f37ff525f17764738fe812852e"
+      url="https://software-static.download.prss.microsoft.com/dbazure/998969d5-f34g-4e03-ac9d-1f9786c66749/26100.1742.240906-0331.ge_release_svc_refresh_CLIENT_IOT_LTSC_EVAL_x64FRE_en-us.iso"
       ;;
     "win10x64-enterprise-eval" )
       size=5550497792
@@ -756,9 +752,9 @@ getMido() {
       url="https://download.microsoft.com/download/B/9/9/B999286E-0A47-406D-8B3D-5B5AD7373A4A/9600.17050.WINBLUE_REFRESH.140317-1640_X64FRE_ENTERPRISE_EVAL_EN-US-IR3_CENA_X64FREE_EN-US_DV9.ISO"
       ;;
     "win2025-eval" )
-      size=6014152704
-      sum="d0ef4502e350e3c6c53c15b1b3020d38a5ded011bf04998e950720ac8579b23d"
-      url="https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_en-us.iso"
+      size=8152356864
+      sum="7b052573ba7894c9924e3e87ba732ccd354d18cb75a883efa9b900ea125bfd51"
+      url="https://software-static.download.prss.microsoft.com/dbazure/998969d5-f34g-4e03-ac9d-1f9786c66749/26100.32230.260111-0550.lt_release_svc_refresh_SERVER_EVAL_x64FRE_en-us.iso"
       ;;
     "win2022-eval" )
       size=5044094976
@@ -817,9 +813,9 @@ getLink1() {
 
   case "${id,,}" in
     "win11x64" | "win11x64-enterprise" | "win11x64-enterprise-eval" )
-      size=5332989952
-      sum="aa1ad990f930d907b7a34ea897abbb0dfbe47552ca8acc146f92e40381839e05"
-      url="11/en-us_windows_11_24h2_x64.iso"
+      size=6723362816
+      sum="d6f5e10db6a6654190ab575fc72c392b7663e31a0156bcc9ce719496a6dde37d"
+      url="11/en-us_windows_11_25h2_x64.iso"
       ;;
     "win11x64-iot" | "win11x64-enterprise-iot" | "win11x64-enterprise-iot-eval" )
       size=5144817664
@@ -832,8 +828,8 @@ getLink1() {
       url="11/X23-81951_26100.1742.240906-0331.ge_release_svc_refresh_CLIENT_ENTERPRISES_OEM_x64FRE_en-us.iso"
       ;;
     "win10x64" | "win10x64-enterprise" | "win10x64-enterprise-eval" )
-      size=5535252480
-      sum="557871965263d0fd0a1ea50b5d0d0d7cb04a279148ca905c1c675c9bc0d5486c"
+      size=5767888896
+      sum="9dce12d73168debc697919a6bc4d8c6624b2175bbed01a2ca97edb7d93627319"
       url="10/en-us_windows_10_22h2_x64.iso"
       ;;
     "win10x64-iot" | "win10x64-enterprise-iot" | "win10x64-enterprise-iot-eval" )
@@ -1078,6 +1074,7 @@ getLink3() {
       size=387424256
       sum="08b11c3897eb38d1e6566a17cec5cdf2b3c620444e160e3db200a7e223aabbd8"
       url="Windows_2000_SP4.iso"
+      ;;
   esac
 
   case "${ret,,}" in
@@ -1167,10 +1164,15 @@ getLink4() {
       sum="c3c604c03677504e8905090a8ce5bb1dde76b6fd58e10f32e3a25bef21b2abe1"
       url="en_windows_8.1_enterprise_with_update_x64_dvd/en_windows_8.1_enterprise_with_update_x64_dvd_6054382.iso"
       ;;
+    "win2025" | "win2025-eval" )
+      size=6014152704
+      sum="d0ef4502e350e3c6c53c15b1b3020d38a5ded011bf04998e950720ac8579b23d"
+      url="26100.1742.240906-0331.ge-release-svc-refresh-server-eval-x-64-fre-en-us/26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_en-us.iso"
+      ;;
     "win2022" | "win2022-eval" )
-      size=5365624832
-      sum="c3c57bb2cf723973a7dcfb1a21e97dfa035753a7f111e348ad918bb64b3114db"
-      url="win-server-2022/2227-January_2024/en-us_windows_server_2022_updated_jan_2024_x64_dvd_2b7a0c9f.iso"
+      size=5550684160
+      sum="5a077ee2a95976ef9f3623eb4040e25cdf7f8f01dee3b8165a32a7626f39f025"
+      url="en-us_windows_server_2022_x64_dvd_620d7eac_202405/en-us_windows_server_2022_x64_dvd_620d7eac.iso"
       ;;
     "win2019" | "win2019-eval" )
       size=5575774208
@@ -1215,7 +1217,7 @@ getLink4() {
     "winvistax64" | "winvistax64-ultimate" )
       size=3861460992
       sum="edf9f947c5791469fd7d2d40a5dcce663efa754f91847aa1d28ed7f585675b78"
-      url="en_windows_vista_sp2_x64_dvd_342267_202010/en_windows_vista_sp2_x64_dvd_342267.iso"
+      url="ms_windows_vista_sp2/en_windows_vista_sp2_x64_dvd_342267.iso"
       ;;
     "winvistax64-enterprise" )
       size=3205953536
@@ -1251,6 +1253,7 @@ getLink4() {
       size=386859008
       sum="e3816f6e80b66ff686ead03eeafffe9daf020a5e4717b8bd4736b7c51733ba22"
       url="MicrosoftWindows2000BuildCollection/5.00.2195.6717_x86fre_client-professional_retail_en-us-ZRMPFPP_EN.iso"
+      ;;
   esac
 
   case "${ret,,}" in
@@ -1605,7 +1608,7 @@ prepareInstall() {
           echo "    OemPnPDriversPath=\"Drivers\viostor;Drivers\NetKVM;Drivers\sata\""
           echo "    NoWaitAfterTextMode=1"
           echo "    NoWaitAfterGUIMode=1"
-          echo "    FileSystem-ConvertNTFS"
+          echo "    FileSystem=ConvertNTFS"
           echo "    ExtendOemPartition=0"
           echo "    Hibernation=\"No\""
           echo ""

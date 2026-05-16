@@ -458,9 +458,9 @@ extractESD() {
   /run/progress.sh "$bootWimFile" "$total3" "$msg ([P])..." &
 
   wimlib-imagex export "$iso" "$imageIndex" "$bootWimFile" --compress=none --boot --quiet || {
-   retVal=$?
-   fKill "progress.sh"
-   error "Adding Windows Setup failed ($retVal)" && return 1
+    retVal=$?
+    fKill "progress.sh"
+    error "Adding Windows Setup failed ($retVal)" && return 1
   }
 
   fKill "progress.sh"
@@ -594,7 +594,7 @@ getPlatform() {
   case "${arch,,}" in
     "0" ) platform="x86" ;;
     "9" ) platform="x64" ;;
-    "12" )platform="arm64" ;;
+    "12" ) platform="arm64" ;;
   esac
 
   echo "$platform"
@@ -893,12 +893,12 @@ updateXML() {
   pw=$(printf '%s' "${pass}Password" | iconv -f utf-8 -t utf-16le | base64 -w 0)
   admin=$(printf '%s' "${pass}AdministratorPassword" | iconv -f utf-8 -t utf-16le | base64 -w 0)
 
-  sed -i "s/<Value>password<\/Value>/<Value>$admin<\/Value>/g" "$asset"
-  sed -i "s/<PlainText>true<\/PlainText>/<PlainText>false<\/PlainText>/g" "$asset"
-  sed -z "s/<Password>...........<Value \/>/<Password>\n          <Value>$pw<\/Value>/g" -i "$asset"
-  sed -z "s/<Password>...............<Value \/>/<Password>\n              <Value>$pw<\/Value>/g" -i "$asset"
-  sed -z "s/<AdministratorPassword>...........<Value \/>/<AdministratorPassword>\n          <Value>$admin<\/Value>/g" -i "$asset"
-  sed -z "s/<AdministratorPassword>...............<Value \/>/<AdministratorPassword>\n              <Value>$admin<\/Value>/g" -i "$asset"
+  sed -i "s|<Value>password<\/Value>|<Value>$admin<\/Value>|g" "$asset"
+  sed -i "s|<PlainText>true<\/PlainText>|<PlainText>false<\/PlainText>|g" "$asset"
+  sed -i -z "s|<Password>...........<Value \/>|<Password>\n          <Value>$pw<\/Value>|g" "$asset"
+  sed -i -z "s|<Password>...............<Value \/>|<Password>\n              <Value>$pw<\/Value>|g" "$asset"
+  sed -i -z "s|<AdministratorPassword>...........<Value \/>|<AdministratorPassword>\n          <Value>$admin<\/Value>|g" "$asset"
+  sed -i -z "s|<AdministratorPassword>...............<Value \/>|<AdministratorPassword>\n              <Value>$admin<\/Value>|g" "$asset"
 
   if [ -n "$EDITION" ]; then
     [[ "${EDITION^^}" == "CORE" ]] && EDITION="STANDARDCORE"
@@ -1015,12 +1015,13 @@ addDrivers() {
   addDriver "$version" "$drivers" "$target" "vioserial" || return 1
   addDriver "$version" "$drivers" "$target" "qemupciserial" || return 1
 
+  local dst="$src/\$OEM\$/\$\$/Drivers"
+  mkdir -p "$dst" || return 1
+  cp -Lr "$dest/." "$dst" || return 1
+
   case "${version,,}" in
     "win11x64"* | "win2025"* )
       # Workaround Virtio GPU driver bug
-      local dst="$src/\$OEM\$/\$\$/Drivers"
-      mkdir -p "$dst" || return 1
-      cp -Lr "$dest/." "$dst" || return 1
       rm -rf "$dest/viogpudo"
       ;;
   esac

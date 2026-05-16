@@ -97,7 +97,7 @@ kubectl apply -f https://raw.githubusercontent.com/dockur/windows/refs/heads/mas
   
   | **Value** | **Version**            | **Size** |
   |---|---|---|
-  | `11`   | Windows 11 Pro            | 7.2 GB   |
+  | `11`   | Windows 11 Pro            | 7.9 GB   |
   | `11l`  | Windows 11 LTSC           | 4.7 GB   |
   | `11e`  | Windows 11 Enterprise     | 6.6 GB   |
   ||||
@@ -111,7 +111,7 @@ kubectl apply -f https://raw.githubusercontent.com/dockur/windows/refs/heads/mas
   | `xp`   | Windows XP Professional   | 0.6 GB   |
   | `2k`   | Windows 2000 Professional | 0.4 GB   | 
   ||||  
-  | `2025` | Windows Server 2025       | 6.7 GB   |
+  | `2025` | Windows Server 2025       | 7.6 GB   |
   | `2022` | Windows Server 2022       | 6.0 GB   |
   | `2019` | Windows Server 2019       | 5.3 GB   |
   | `2016` | Windows Server 2016       | 6.5 GB   |
