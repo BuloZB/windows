@@ -24,7 +24,9 @@ parseVersion() {
     VERSION="${VERSION:1:-1}"
   fi
 
-  [ -n "$VERSION" ] && VERSION=$(expr "$VERSION" : "^\ *\(.*[^ ]\)\ *$")
+  VERSION="${VERSION#"${VERSION%%[! ]*}"}"
+  VERSION="${VERSION%"${VERSION##*[! ]}"}"
+
   [ -z "$VERSION" ] && VERSION="win11"
 
   case "${VERSION,,}" in
@@ -376,9 +378,9 @@ getLanguage() {
 
 parseLanguage() {
 
-  REGION="${REGION//_/-/}"
-  KEYBOARD="${KEYBOARD//_/-/}"
-  LANGUAGE="${LANGUAGE//_/-/}"
+  REGION="${REGION//_/-}"
+  KEYBOARD="${KEYBOARD//_/-}"
+  LANGUAGE="${LANGUAGE//_/-}"
 
   [ -z "$LANGUAGE" ] && LANGUAGE="en"
 
@@ -813,8 +815,8 @@ getLink1() {
 
   case "${id,,}" in
     "win11x64" | "win11x64-enterprise" | "win11x64-enterprise-eval" )
-      size=6723362816
-      sum="d6f5e10db6a6654190ab575fc72c392b7663e31a0156bcc9ce719496a6dde37d"
+      size=6898546688
+      sum="2618a56931b645a6f097082431994bd85ae80862518de389e382f35ebfd455be"
       url="11/en-us_windows_11_25h2_x64.iso"
       ;;
     "win11x64-iot" | "win11x64-enterprise-iot" | "win11x64-enterprise-iot-eval" )
@@ -1860,7 +1862,6 @@ detectLegacy() {
     [ -z "$find" ] && find=$(find "$dir" -maxdepth 1 -type f -iname WIN51IB -print -quit)
     [ -z "$find" ] && find=$(find "$dir" -maxdepth 1 -type f -iname WIN51ID -print -quit)
     [ -z "$find" ] && find=$(find "$dir" -maxdepth 1 -type f -iname WIN51IL -print -quit)
-    [ -z "$find" ] && find=$(find "$dir" -maxdepth 1 -type f -iname WIN51IS -print -quit)
     [ -z "$find" ] && find=$(find "$dir" -maxdepth 1 -type f -iname WIN51AA -print -quit)
     [ -z "$find" ] && find=$(find "$dir" -maxdepth 1 -type f -iname WIN51AD -print -quit)
     [ -z "$find" ] && find=$(find "$dir" -maxdepth 1 -type f -iname WIN51AS -print -quit)
