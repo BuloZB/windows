@@ -11,11 +11,8 @@ QEMU_LOG="$QEMU_DIR/qemu.log"
 QEMU_OUT="$QEMU_DIR/qemu.out"
 QEMU_END="$QEMU_DIR/qemu.end"
 
-rm -f "$QEMU_DIR/qemu.*"
-touch "$QEMU_LOG"
-
 _trap() {
-  func="$1" ; shift
+  local func="$1" ; shift
   for sig ; do
     trap "$func $sig" "$sig"
   done
@@ -92,7 +89,7 @@ finish() {
     while isAlive "$pid"; do
 
       sleep 1
-      cnt=$((cnt+1))
+      (( cnt++ ))
 
       # Workaround for zombie pid
       [ ! -s "$QEMU_PID" ] && break
@@ -120,7 +117,7 @@ finish() {
 
   for pid in "${pids[@]}"; do
       if [[ -s "$pid" ]]; then 
-          pKill "$(cat "$pid")"
+          pKill "$(<"$pid")"
       fi
       rm -f "$pid"
   done 
@@ -173,15 +170,23 @@ terminal() {
 
 _graceful_shutdown() {
 
-  local code=$?
+  local sig="$1"
+  local code=0
 
-  set +e
+  case "$sig" in
+    SIGTERM) code=143 ;;
+    SIGINT)  code=130 ;;
+    SIGHUP)  code=129 ;;
+    SIGABRT) code=134 ;;
+    SIGQUIT) code=131 ;;
+  esac
 
   if [ -f "$QEMU_END" ]; then
     info "Received $1 while already shutting down..."
     return
   fi
 
+  set +e
   touch "$QEMU_END"
   info "Received $1, sending ACPI shutdown signal..."
 
@@ -210,7 +215,7 @@ _graceful_shutdown() {
   while [ "$cnt" -lt "$QEMU_TIMEOUT" ]; do
 
     sleep 1
-    cnt=$((cnt+1))
+    (( cnt++ ))
 
     ! isAlive "$pid" && break
     # Workaround for zombie pid
@@ -229,6 +234,8 @@ _graceful_shutdown() {
 
   finish "$code" && return "$code"
 }
+
+touch "$QEMU_LOG"
 
 SERIAL="pty"
 MONITOR="telnet:localhost:$MON_PORT,server,nowait,nodelay -daemonize -D $QEMU_LOG"
