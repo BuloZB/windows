@@ -7,20 +7,14 @@ EFISYS="efi/microsoft/boot/efisys_noprompt.bin"
 
 backup () {
 
-  local count=1
   local iso="$1"
+  local count=1
   local name="unknown"
   local root="$STORAGE/backups"
-  local previous="$STORAGE/windows.base"
+  local file previous failed=""
 
-  if [ -f "$previous" ]; then
-
-    previous=$(<"$previous")
-    previous="${previous//[![:print:]]/}"
-
-    [ -n "$previous" ] && name="${previous%.*}"
-
-  fi
+  previous=$(readState "base") || return 1
+  [ -n "$previous" ] && name="${previous%.*}"
 
   if ! makeDir "$root"; then
     error "Failed to create directory \"$root\" !"
@@ -30,8 +24,7 @@ backup () {
   local folder="$name"
   local dir="$root/$folder"
 
-  while [ -d "$dir" ]
-  do
+  while [ -d "$dir" ]; do
     (( count++ ))
     folder="${name}.${count}"
     dir="$root/$folder"
@@ -42,13 +35,28 @@ backup () {
     return 1
   fi
 
-  [ -f "$iso" ] && mv -f "$iso" "$dir/"
-  find "$STORAGE" -maxdepth 1 -type f -iname 'data.*' -not -iname '*.iso' -exec mv -n {} "$dir/" \;
-  find "$STORAGE" -maxdepth 1 -type f -iname 'windows.*' -not -iname '*.iso' -exec mv -n {} "$dir/" \;
-  find "$STORAGE" -maxdepth 1 -type f \( -iname '*.rom' -or -iname '*.vars' \) -exec mv -n {} "$dir/" \;
+  if [ -f "$iso" ]; then
+    if ! mv -f -- "$iso" "$dir/"; then
+      error "Failed to move \"$iso\" to \"$dir\"."
+      failed="Y"
+    fi
+  fi
+
+  while IFS= read -r -d '' file; do
+    if ! mv -n -- "$file" "$dir/"; then
+      error "Failed to move \"$file\" to \"$dir\"."
+      failed="Y"
+    fi
+  done < <(
+    find "$STORAGE" -maxdepth 1 -type f \
+      \( -iname 'data.*' -or -iname 'windows.*' -or -iname '*.rom' -or -iname '*.vars' \) \
+      -not -iname '*.iso' -print0
+  )
 
   [ -z "$(ls -A "$dir")" ] && rm -rf "$dir"
   [ -z "$(ls -A "$root")" ] && rm -rf "$root"
+
+  [ -n "$failed" ] && return 1
 
   return 0
 }
@@ -59,50 +67,48 @@ skipInstall() {
   local method=""
   local magic byte
   local boot="$STORAGE/windows.boot"
-  local previous="$STORAGE/windows.base"
+  local previous
 
-  if [ -f "$previous" ]; then
+  previous=$(readState "base") || return 1
 
-    previous=$(<"$previous")
-    previous="${previous//[![:print:]]/}"
+  if [ -n "$previous" ]; then
+    if [[ "${STORAGE,,}/${previous,,}" != "${iso,,}" ]]; then
 
-    if [ -n "$previous" ]; then
-      if [[ "${STORAGE,,}/${previous,,}" != "${iso,,}" ]]; then
+      if ! hasDisk; then
 
-        if ! hasDisk; then
-
-          rm -f "$STORAGE/$previous"
-          return 1
-
-        fi
-
-        if [[ "${iso,,}" == "${STORAGE,,}/windows."* ]]; then
-          method="your custom .iso file was changed"
-        else
-          if [[ "${previous,,}" != "windows."* ]]; then
-            method="the VERSION variable was changed"
-          else
-            method="your custom .iso file was removed"
-
-            if [ -f "$boot" ]; then
-              info "Detected that $method, will be ignored."
-              return 0
-            fi
-
-          fi
-        fi
-
-        info "Detected that $method, a backup of your previous installation will be saved..."
-        ! backup "$STORAGE/$previous" && error "Backup failed!"
-
+        rm -f "$STORAGE/$previous"
         return 1
 
       fi
-    fi
 
+      if [[ "${iso,,}" == "${STORAGE,,}/windows."* ]]; then
+        method="your custom .iso file was changed"
+      else
+        if [[ "${previous,,}" != "windows."* ]]; then
+          method="the VERSION variable was changed"
+        else
+          method="your custom .iso file was removed"
+
+          if [ -f "$boot" ] && hasData; then
+            info "Detected that $method, will be ignored."
+            return 0
+          fi
+
+        fi
+      fi
+
+      info "Detected that $method, a backup of your previous installation will be saved..."
+
+      if ! backup "$STORAGE/$previous"; then
+        warn "the backup was incomplete, continuing with installation..."
+      fi
+
+      return 1
+
+    fi
   fi
 
-  [ -f "$boot" ] && hasDisk && return 0
+  [ -f "$boot" ] && hasData && return 0
 
   [ ! -f "$iso" ] && return 1
   [ ! -s "$iso" ] && return 1
@@ -110,7 +116,7 @@ skipInstall() {
   # Check if the ISO was already processed by our script
   magic=$(dd if="$iso" bs=1 count=1 status=none | tr -d '\000')
   magic="$(printf '%s' "$magic" | od -A n -t x1 -v | tr -d ' \n')"
-  byte="16" && [[ "$MANUAL" == [Yy1]* ]] && byte="17"
+  byte="16" && enabled "$MANUAL" && byte="17"
 
   if [[ "$magic" != "$byte" ]]; then
 
@@ -158,7 +164,9 @@ startInstall() {
   skipInstall "$BOOT" && return 1
 
   if hasDisk; then
-    ! backup "" && error "Backup failed!"
+    if ! backup ""; then
+      warn "the backup was incomplete, continuing with installation..."
+    fi
   fi
 
   if ! makeDir "$TMP"; then
@@ -185,15 +193,19 @@ startInstall() {
   return 0
 }
 
-writeFile() {
+checkFreeSpace() {
 
-  local txt="$1"
-  local path="$2"
+  local dir="$1"
+  local size="$2"
+  local size_gb space space_gb
 
-  echo "$txt" >"$path"
+  size_gb=$(formatBytes "$size")
+  space=$(df --output=avail -B 1 "$dir" | tail -n 1)
+  space_gb=$(formatBytes "$space")
 
-  if ! setOwner "$path"; then
-    error "Failed to set the owner for \"$path\" !"
+  if (( size > space )); then
+    error "Not enough free space in $STORAGE, have $space_gb available but need at least $size_gb."
+    return 1
   fi
 
   return 0
@@ -210,79 +222,78 @@ finishInstall() {
   fi
 
   if [[ "$iso" == "$STORAGE/"* ]]; then
-    ! setOwner "$iso" && error "Failed to set the owner for \"$iso\" !"
+    if ! setOwner "$iso"; then
+      warn "failed to set the owner for \"$iso\" !"
+    fi
   fi
 
   if [[ "$aborted" != [Yy1]* ]]; then
     # Mark ISO as prepared via magic byte
-    byte="16" && [[ "$MANUAL" == [Yy1]* ]] && byte="17"
+    byte="16" && enabled "$MANUAL" && byte="17"
     if ! printf '%b' "\x$byte" | dd of="$iso" bs=1 seek=0 count=1 conv=notrunc status=none; then
       warn "failed to set magic byte in ISO file: $iso"
     fi
   fi
 
   local file="$STORAGE/windows.ver"
-  cp -f /etc/version "$file"
-  ! setOwner "$file" && error "Failed to set the owner for \"$file\" !"
+  cp -f /etc/version "$file" || return 1
+
+  if ! setOwner "$file"; then
+    warn "Failed to set the owner for \"$file\" !"
+  fi
 
   if [[ "$iso" == "$STORAGE/"* ]]; then
     if [[ "$aborted" != [Yy1]* ]] || [ -z "$CUSTOM" ]; then
       base=$(basename "$iso")
-      file="$STORAGE/windows.base"
-      writeFile "$base" "$file"
+      writeState "base" "$base" || return 1
     fi
   fi
 
   if [[ "${PLATFORM,,}" == "x64" ]]; then
     if [[ "${BOOT_MODE,,}" == "windows_legacy" ]]; then
-      file="$STORAGE/windows.mode"
-      writeFile "$BOOT_MODE" "$file"
+      writeState "mode" "$BOOT_MODE" || return 1
       if [[ "${MACHINE,,}" != "q35" ]]; then
-        file="$STORAGE/windows.old"
-        writeFile "$MACHINE" "$file"
+        writeState "old" "$MACHINE" || return 1
       fi
     else
       # Enable secure boot + TPM on manual installs as Win11 requires
-      if [[ "$MANUAL" == [Yy1]* || "$aborted" == [Yy1]* ]]; then
+      if enabled "$MANUAL" || [[ "$aborted" == [Yy1]* ]]; then
         if [[ "${DETECTED,,}" == "win11"* ]]; then
           BOOT_MODE="windows_secure"
-          file="$STORAGE/windows.mode"
-          writeFile "$BOOT_MODE" "$file"
+          writeState "mode" "$BOOT_MODE" || return 1
         fi
       fi
       # Enable secure boot on multi-socket systems to workaround freeze
       if [ -n "$SOCKETS" ] && [[ "$SOCKETS" != "1" ]]; then
         BOOT_MODE="windows_secure"
-        file="$STORAGE/windows.mode"
-        writeFile "$BOOT_MODE" "$file"
+        writeState "mode" "$BOOT_MODE" || return 1
       fi
     fi
   fi
 
   if [ -n "${ARGS:-}" ]; then
     ARGUMENTS="$ARGS ${ARGUMENTS:-}"
-    file="$STORAGE/windows.args"
-    writeFile "$ARGS" "$file"
+    writeState "args" "$ARGS" || return 1
   fi
 
   if [ -n "${VGA:-}" ] && [[ "${VGA:-}" != "virtio"* ]]; then
-    file="$STORAGE/windows.vga"
-    writeFile "$VGA" "$file"
+    writeState "vga" "$VGA" || return 1
   fi
 
   if [ -n "${USB:-}" ] && [[ "${USB:-}" != "qemu-xhci"* ]]; then
-    file="$STORAGE/windows.usb"
-    writeFile "$USB" "$file"
+    writeState "usb" "$USB" || return 1
   fi
 
   if [ -n "${DISK_TYPE:-}" ] && [[ "${DISK_TYPE:-}" != "scsi" ]]; then
-    file="$STORAGE/windows.type"
-    writeFile "$DISK_TYPE" "$file"
+    writeState "type" "$DISK_TYPE" || return 1
   fi
 
   if [ -n "${ADAPTER:-}" ] && [[ "${ADAPTER:-}" != "virtio-net-pci" ]]; then
-    file="$STORAGE/windows.net"
-    writeFile "$ADAPTER" "$file"
+    writeState "net" "$ADAPTER" || return 1
+  fi
+
+  if [ -n "${SOUND:-}" ] && [[ "${SOUND:-}" != "intel-hda" ]]; then
+    writeState "sound" "$SOUND" || return 1
   fi
 
   rm -rf "$TMP"
@@ -296,7 +307,7 @@ abortInstall() {
   local efi
 
   [[ "${iso,,}" == *".esd" ]] && exit 60
-  [[ "${UNPACK:-}" == [Yy1]* ]] && exit 60
+  enabled "${UNPACK:-}" && exit 60
 
   efi=$(find "$dir" -maxdepth 1 -type d -iname efi -print -quit)
 
@@ -329,7 +340,7 @@ findFile() {
   [ ! -d "$dir" ] && dir=$(find "$STORAGE" -maxdepth 1 -type d -iname "$fname" -print -quit)
 
   if [ -d "$dir" ]; then
-    if ! hasDisk || [ ! -f "$boot" ]; then
+    if ! hasData || [ ! -f "$boot" ]; then
       error "The bind $dir maps to a file that does not exist!" && return 1
     fi
   fi
@@ -370,95 +381,135 @@ detectCustom() {
   return 0
 }
 
+getEsdField() {
+
+  local list="$1"
+  local index="$2"
+
+  sed -n "${index}p" <<< "$list" | tr -cd '0-9'
+
+  return 0
+}
+
 extractESD() {
 
   local iso="$1"
   local dir="$2"
   local version="$3"
   local desc="$4"
-  local size size_gb sizes space space_gb
-  local retVal total total1 total2 total3 total4
-  local imageIndex links links1 links2 links3 links4
 
-  local msg="Extracting $desc bootdisk"
+  local msg ret index
+  local minSize freeSpace bootPad installPad
+  local info count totals links
+  local bootTotal bootLinks bootSize
+  local wimTotal wimLinks wimSize
+  local installSize
+  local bootWim installWim
+  local edition imgEdition
+
+  minSize=100000000
+  freeSpace=9606127360
+  bootPad=60000000
+  installPad=3000000
+
+  msg="Extracting $desc bootdisk"
   info "$msg..." && html "$msg..."
 
-  if [ "$(stat -c%s "$iso")" -lt 100000000 ]; then
-    error "Invalid ESD file: Size is smaller than 100 MB" && return 1
+  if [ "$(stat -c%s "$iso")" -lt "$minSize" ]; then
+    error "Invalid ESD file: Size is smaller than 100 MB"
+    return 1
   fi
 
   rm -rf "$dir"
 
   if ! makeDir "$dir"; then
-    error "Failed to create directory \"$dir\" !" && return 1
+    error "Failed to create directory \"$dir\" !"
+    return 1
   fi
 
-  size=9606127360
-  size_gb=$(formatBytes "$size")
-  space=$(df --output=avail -B 1 "$dir" | tail -n 1)
-  space_gb=$(formatBytes "$space")
+  checkFreeSpace "$dir" "$freeSpace" || return 1
 
-  if (( size > space )); then
-    error "Not enough free space in $STORAGE, have $space_gb available but need at least $size_gb." && return 1
+  info=$(wimlib-imagex info "$iso") || {
+    error "Cannot read ESD file information!"
+    return 1
+  }
+
+  count=$(awk '/Image Count:/ {print $3}' <<< "$info")
+
+  if [[ ! "$count" =~ ^[0-9]+$ ]]; then
+    error "Cannot read the image count in ESD file!"
+    return 1
   fi
 
-  local esdImageCount
-  esdImageCount=$(wimlib-imagex info "$iso" | awk '/Image Count:/ {print $3}')
-
-  if [ -z "$esdImageCount" ]; then
-    error "Cannot read the image count in ESD file!" && return 1
+  if (( count < 3 )); then
+    error "Invalid ESD file: expected at least 3 images, found $count."
+    return 1
   fi
 
-  sizes=$(wimlib-imagex info "$iso" | grep "Total Bytes:")
-  links=$(wimlib-imagex info "$iso" | grep "Hard Link Bytes:")
+  totals=$(grep "Total Bytes:" <<< "$info" || true)
+  links=$(grep "Hard Link Bytes:" <<< "$info" || true)
 
-  total1=$(awk "NR==1{ print; }" <<< "$sizes" | cut -d':' -f2 | sed 's/^ *//')
-  links1=$(awk "NR==1{ print; }" <<< "$links" | cut -d':' -f2 | sed 's/^ *//')
-  total=$(( total1 - links1 ))
+  bootTotal=$(getEsdField "$totals" 1)
+  bootLinks=$(getEsdField "$links" 1)
 
-  total3=$(awk "NR==3{ print; }" <<< "$sizes" | cut -d':' -f2 | sed 's/^ *//')
-  links3=$(awk "NR==3{ print; }" <<< "$links" | cut -d':' -f2 | sed 's/^ *//')
-  total3=$(( total3 - links3 ))
-  total3=$(( total3 + 60000000 ))
+  if [[ ! "$bootTotal" =~ ^[0-9]+$ ]] || [[ ! "$bootLinks" =~ ^[0-9]+$ ]]; then
+    error "Cannot read bootdisk size from ESD file!"
+    return 1
+  fi
 
-  /run/progress.sh "$dir" "$total" "$msg ([P])..." &
+  bootSize=$(( bootTotal - bootLinks ))
 
-  imageIndex="1"
-  wimlib-imagex apply "$iso" "$imageIndex" "$dir" --quiet 2>/dev/null || {
-    retVal=$?
+  wimTotal=$(getEsdField "$totals" 3)
+  wimLinks=$(getEsdField "$links" 3)
+
+  if [[ ! "$wimTotal" =~ ^[0-9]+$ ]] || [[ ! "$wimLinks" =~ ^[0-9]+$ ]]; then
+    error "Cannot read boot.wim size from ESD file!"
+    return 1
+  fi
+
+  wimSize=$(( wimTotal - wimLinks + bootPad ))
+
+  /run/progress.sh "$dir" "$bootSize" "$msg ([P])..." &
+
+  index="1"
+  wimlib-imagex apply "$iso" "$index" "$dir" --quiet 2>/dev/null || {
+    ret=$?
     fKill "progress.sh"
-    error "Extracting $desc bootdisk failed ($retVal)" && return 1
+    error "Extracting $desc bootdisk failed ($ret)"
+    return 1
   }
 
   fKill "progress.sh"
 
-  local bootWimFile="$dir/sources/boot.wim"
-  local installWimFile="$dir/sources/install.wim"
+  bootWim="$dir/sources/boot.wim"
+  installWim="$dir/sources/install.wim"
 
-  local msg="Extracting $desc environment"
+  msg="Extracting $desc environment"
   info "$msg..." && html "$msg..."
 
-  imageIndex="2"
-  /run/progress.sh "$bootWimFile" "$total3" "$msg ([P])..." &
+  index="2"
+  /run/progress.sh "$bootWim" "$wimSize" "$msg ([P])..." &
 
-  wimlib-imagex export "$iso" "$imageIndex" "$bootWimFile" --compress=none --quiet || {
-    retVal=$?
+  wimlib-imagex export "$iso" "$index" "$bootWim" --compress=none --quiet || {
+    ret=$?
     fKill "progress.sh"
-    error "Adding WinPE failed ($retVal)" && return 1
+    error "Adding WinPE failed ($ret)"
+    return 1
   }
 
   fKill "progress.sh"
 
-  local msg="Extracting $desc setup"
+  msg="Extracting $desc setup"
   info "$msg..."
 
-  imageIndex="3"
-  /run/progress.sh "$bootWimFile" "$total3" "$msg ([P])..." &
+  index="3"
+  /run/progress.sh "$bootWim" "$wimSize" "$msg ([P])..." &
 
-  wimlib-imagex export "$iso" "$imageIndex" "$bootWimFile" --compress=none --boot --quiet || {
-    retVal=$?
+  wimlib-imagex export "$iso" "$index" "$bootWim" --compress=none --boot --quiet || {
+    ret=$?
     fKill "progress.sh"
-    error "Adding Windows Setup failed ($retVal)" && return 1
+    error "Adding Windows Setup failed ($ret)"
+    return 1
   }
 
   fKill "progress.sh"
@@ -469,30 +520,31 @@ extractESD() {
     LABEL="CPBA_A64FRE_EN-US_DV9"
   fi
 
-  local msg="Extracting $desc image"
+  msg="Extracting $desc image"
   info "$msg..." && html "$msg..."
 
-  local edition imageEdition
   edition=$(getCatalog "$version" "name")
 
   if [ -z "$edition" ]; then
-    error "Invalid VERSION specified, value \"$version\" is not recognized!" && return 1
+    error "Invalid VERSION specified, value \"$version\" is not recognized!"
+    return 1
   fi
 
-  for (( imageIndex=4; imageIndex<=esdImageCount; imageIndex++ )); do
+  for (( index=4; index<=count; index++ )); do
 
-    imageEdition=$(wimlib-imagex info "$iso" "$imageIndex" | grep '^Description:' | sed 's/Description:[ \t]*//')
-    [[ "${imageEdition,,}" != "${edition,,}" ]] && continue
+    imgEdition=$(wimlib-imagex info "$iso" "$index" | grep '^Description:' | sed 's/Description:[ \t]*//')
+    [[ "${imgEdition,,}" != "${edition,,}" ]] && continue
 
-    total4=$(du -sb "$iso" | cut -f1)
-    total4=$(( total4 + 3000000 ))
+    installSize=$(stat -c%s "$iso")
+    installSize=$(( installSize + installPad ))
 
-    /run/progress.sh "$installWimFile" "$total4" "$msg ([P])..." &
+    /run/progress.sh "$installWim" "$installSize" "$msg ([P])..." &
 
-    wimlib-imagex export "$iso" "$imageIndex" "$installWimFile" --compress=LZMS --chunk-size 128K --quiet || {
-      retVal=$?
+    wimlib-imagex export "$iso" "$index" "$installWim" --compress=LZMS --chunk-size 128K --quiet || {
+      ret=$?
       fKill "progress.sh"
-      error "Addition of $imageIndex to the $desc image failed ($retVal)" && return 1
+      error "Addition of $index to the $desc image failed ($ret)"
+      return 1
     }
 
     fKill "progress.sh"
@@ -501,7 +553,8 @@ extractESD() {
   done
 
   fKill "progress.sh"
-  error "Failed to find product '$edition' in install.wim!" && return 1
+  error "Failed to find product '$edition' in install.wim!"
+  return 1
 }
 
 extractImage() {
@@ -510,7 +563,7 @@ extractImage() {
   local dir="$2"
   local version="$3"
   local desc="local ISO"
-  local file size size_gb space space_gb
+  local file size
 
   if [ -z "$CUSTOM" ]; then
     desc="downloaded ISO"
@@ -534,17 +587,12 @@ extractImage() {
   fi
 
   size=$(stat -c%s "$iso")
-  size_gb=$(formatBytes "$size")
-  space=$(df --output=avail -B 1 "$dir" | tail -n 1)
-  space_gb=$(formatBytes "$space")
 
   if (( size < 100000000 )); then
     error "Invalid ISO file: Size is smaller than 100 MB" && return 1
   fi
 
-  if (( size > space )); then
-    error "Not enough free space in $STORAGE, have $space_gb available but need at least $size_gb." && return 1
-  fi
+  checkFreeSpace "$dir" "$size" || return 1
 
   rm -rf "$dir"
   /run/progress.sh "$dir" "$size" "$msg ([P])..." &
@@ -556,9 +604,9 @@ extractImage() {
 
   fKill "progress.sh"
 
-  if [[ "${UNPACK:-}" != [Yy1]* ]]; then
+  if ! enabled "${UNPACK:-}"; then
 
-    LABEL=$(isoinfo -d -i "$iso" | sed -n 's/Volume id: //p')
+    LABEL=$(isoinfo -d -i "$iso" | sed -n 's/Volume id: //p') || LABEL=""
 
   else
 
@@ -572,8 +620,8 @@ extractImage() {
       error "Failed to extract archive!" && return 1
     fi
 
-    LABEL=$(isoinfo -d -i "$file" | sed -n 's/Volume id: //p')
-    rm -f "$file"
+    LABEL=$(isoinfo -d -i "$file" | sed -n 's/Volume id: //p') || LABEL=""
+    rm -f "$file" || warn "Failed to remove temporary ISO file: $file"
 
   fi
 
@@ -648,6 +696,20 @@ selectVersion() {
 
   id=$(fromName "$name" "$platform")
   [ -z "$id" ] && warn "Unknown ${tag,,}: '$name'" && return 0
+
+  if [ -n "$EDITION" ] && [[ "$id" != win20* ]]; then
+    case "${EDITION,,}" in
+      "pro" | "professional" | "business" ) prefer="$id" ;;
+      * ) prefer="$id-${EDITION,,}" ;;
+    esac
+
+    if hasVersion "$prefer" "$tag" "$xml"; then
+      echo "$prefer"
+      return 0
+    fi
+
+    warn "Edition '$EDITION' is not supported by this image, using automatic selection instead."
+  fi
 
   prefer="$id-enterprise"
   hasVersion "$prefer" "$tag" "$xml" && echo "$prefer" && return 0
@@ -727,7 +789,7 @@ detectImage() {
 
   local dir="$1"
   local version="$2"
-  local desc msg find language
+  local desc msg language
 
   XML=""
 
@@ -739,7 +801,7 @@ detectImage() {
 
     skipVersion "${DETECTED,,}" && return 0
 
-    if ! setXML "" && [[ "$MANUAL" != [Yy1]* ]]; then
+    if ! setXML "" && ! enabled "$MANUAL"; then
       MANUAL="Y"
       desc=$(printEdition "$DETECTED" "this version")
       warn "the answer file for $desc was not found ($DETECTED.xml), $FB."
@@ -769,14 +831,18 @@ detectImage() {
     warn "failed to locate 'install.wim' or 'install.esd' in ISO image, $FB" && return 1
   fi
 
-  info=$(wimlib-imagex info -xml "$wim" | iconv -f UTF-16LE -t UTF-8)
+  if ! info=$(wimlib-imagex info -xml "$wim" | iconv -f UTF-16LE -t UTF-8); then
+    warn "failed to read Windows image information, $FB"
+    return 1
+  fi
+
   checkPlatform "$info" || exit 67
 
   DETECTED=$(detectVersion "$info")
 
   if [ -z "$DETECTED" ]; then
     msg="Failed to determine Windows version from image"
-    if setXML "" || [[ "$MANUAL" == [Yy1]* ]]; then
+    if setXML "" || enabled "$MANUAL"; then
       info "${msg}!"
     else
       MANUAL="Y"
@@ -803,8 +869,8 @@ detectImage() {
   msg="the answer file for $desc was not found ($DETECTED.xml)"
   local fallback="/run/assets/${DETECTED%%-*}.xml"
 
-  if setXML "$fallback" || [[ "$MANUAL" == [Yy1]* ]]; then
-    [[ "$MANUAL" != [Yy1]* ]] && warn "${msg}."
+  if setXML "$fallback" || enabled "$MANUAL"; then
+    ! enabled "$MANUAL" && warn "${msg}."
   else
     MANUAL="Y"
     warn "${msg}, $FB."
@@ -841,71 +907,333 @@ prepareImage() {
   return 1
 }
 
+escapeXMLSed() {
+
+  local s
+
+  s=$(escapeXML "$1") || return 1
+  s=${s//\\/\\\\}
+  s=${s//&/\\&}
+  s=${s//|/\\|}
+
+  printf '%s' "$s"
+  return 0
+}
+
+updateDomain() {
+
+  local asset="$1"
+  local domain account auth pass
+  local pw cred_domain tmp result
+
+  domain=$(escapeXML "$2") || return 1
+  account=$(escapeXML "$3") || return 1
+  auth=$(escapeXML "$4") || return 1
+  pass=$(escapeXML "$5") || return 1
+  pw="$6"
+
+  cred_domain="$domain"
+
+  case "$4" in
+    *\\* | *@* ) cred_domain="" ;;
+  esac
+
+  grep -Eq 'Microsoft-Windows-UnattendedJoin|<DomainAccounts([[:space:]/>])' "$asset" && return 1
+
+  tmp=$(mktemp -d) || return 1
+  result="$tmp/answer.xml"
+
+  if ! DOMAIN_XML="$domain" ACCOUNT_XML="$account" AUTH_XML="$auth" \
+    PASS_XML="$pass" CRED_DOMAIN="$cred_domain" PW="$pw" \
+    awk '
+      /<settings[^>]*pass="specialize"[^>]*>/ { section = "specialize" }
+      /<settings[^>]*pass="oobeSystem"[^>]*>/ { section = "oobeSystem" }
+      section == "oobeSystem" && /<UserAccounts([[:space:]>])/ { in_accounts = 1 }
+      section == "oobeSystem" && /<AutoLogon([[:space:]>])/ { in_autologon = 1 }
+
+      section == "oobeSystem" && in_accounts && !accounts_added &&
+        /<AdministratorPassword([[:space:]>])/ {
+        print "        <DomainAccounts>\n" \
+              "          <DomainAccountList wcm:action=\"add\">\n" \
+              "            <DomainAccount wcm:action=\"add\">\n" \
+              "              <Name>" ENVIRON["ACCOUNT_XML"] "</Name>\n" \
+              "              <Group>Administrators</Group>\n" \
+              "            </DomainAccount>\n" \
+              "            <Domain>" ENVIRON["DOMAIN_XML"] "</Domain>\n" \
+              "          </DomainAccountList>\n" \
+              "        </DomainAccounts>"
+        accounts_added = 1
+      }
+
+      section == "oobeSystem" && in_autologon &&
+        /^[[:space:]]*<Username>.*<\/Username>[[:space:]]*$/ {
+        print "        <Username>" ENVIRON["ACCOUNT_XML"] "</Username>\n" \
+              "        <Domain>" ENVIRON["DOMAIN_XML"] "</Domain>"
+        autologon_added = 1
+        next
+      }
+
+      section == "oobeSystem" && in_autologon &&
+        /^[[:space:]]*<Domain([[:space:]/>])/ { next }
+
+      section == "oobeSystem" && in_autologon &&
+        /^[[:space:]]*<Value>.*<\/Value>[[:space:]]*$/ {
+        print "          <Value>" ENVIRON["PW"] "</Value>"
+        password_added = 1
+        next
+      }
+
+      section == "specialize" && !join_added &&
+        /^[[:space:]]*<\/settings>[[:space:]]*$/ {
+        print "    <component name=\"Microsoft-Windows-UnattendedJoin\" processorArchitecture=\"amd64\" publicKeyToken=\"31bf3856ad364e35\" language=\"neutral\" versionScope=\"nonSxS\">\n" \
+              "      <Identification>\n" \
+              "        <Credentials>"
+
+        if (ENVIRON["CRED_DOMAIN"] != "") {
+          print "          <Domain>" ENVIRON["CRED_DOMAIN"] "</Domain>"
+        }
+
+        print "          <Username>" ENVIRON["AUTH_XML"] "</Username>\n" \
+              "          <Password>" ENVIRON["PASS_XML"] "</Password>\n" \
+              "        </Credentials>\n" \
+              "        <JoinDomain>" ENVIRON["DOMAIN_XML"] "</JoinDomain>\n" \
+              "      </Identification>\n" \
+              "    </component>"
+
+        join_added = 1
+      }
+
+      { print }
+
+      section == "oobeSystem" && /<\/AutoLogon>/ { in_autologon = 0 }
+      section == "oobeSystem" && /<\/UserAccounts>/ { in_accounts = 0 }
+      /^[[:space:]]*<\/settings>[[:space:]]*$/ { section = "" }
+
+      END { exit !(join_added && accounts_added && autologon_added && password_added) }
+    ' "$asset" > "$result" ||
+    ! mv -f "$result" "$asset"; then
+
+    rm -rf "$tmp" || true
+    return 1
+  fi
+
+  rm -rf "$tmp" || return 1
+  return 0
+}
+
 updateXML() {
 
   local asset="$1"
   local language="$2"
-  local culture region user admin pass keyboard
+  local app value culture region keyboard edition key
+  local user raw_user user_xml auth_user safe_user
+  local admin pass pw domain qualifier host
 
-  [ -z "$HEIGHT" ] && HEIGHT="720"
   [ -z "$WIDTH" ] && WIDTH="1280"
+  [ -z "$HEIGHT" ] && HEIGHT="720"
 
-  sed -i "s/>Windows for Docker</>$APP for $ENGINE</g" "$asset"
-  sed -i "s/<VerticalResolution>1080<\/VerticalResolution>/<VerticalResolution>$HEIGHT<\/VerticalResolution>/g" "$asset"
-  sed -i "s/<HorizontalResolution>1920<\/HorizontalResolution>/<HorizontalResolution>$WIDTH<\/HorizontalResolution>/g" "$asset"
+  validateResolution "WIDTH" "$WIDTH" 320 || return 1
+  validateResolution "HEIGHT" "$HEIGHT" 200 || return 1
+  validateComputerName "$HOST" || return 1
+  validateProductKey "$KEY" || return 1
+  validatePassword "$PASSWORD" || return 1
 
-  culture=$(getLanguage "$language" "culture")
+  app=$(escapeXMLSed "$APP for $ENGINE") || return 1
+  host=$(escapeXMLSed "$HOST") || return 1
+
+  sed -i "s|>Windows for Docker<|>$app<|g" "$asset" || return 1
+  sed -i -E "s|<ComputerName>[^<]*</ComputerName>|<ComputerName>$host</ComputerName>|g" "$asset" || return 1
+  sed -i "s|<VerticalResolution>1080</VerticalResolution>|<VerticalResolution>$HEIGHT</VerticalResolution>|g" "$asset" || return 1
+  sed -i "s|<HorizontalResolution>1920</HorizontalResolution>|<HorizontalResolution>$WIDTH</HorizontalResolution>|g" "$asset" || return 1
+
+  culture=$(getLanguage "$language" "culture") || return 1
 
   if [ -n "$culture" ] && [[ "${culture,,}" != "en-us" ]]; then
-    sed -i "s/<UILanguage>en-US<\/UILanguage>/<UILanguage>$culture<\/UILanguage>/g" "$asset"
+    value=$(escapeXMLSed "$culture") || return 1
+    sed -i "s|<UILanguage>en-US</UILanguage>|<UILanguage>$value</UILanguage>|g" "$asset" || return 1
   fi
 
   region="$REGION"
   [ -z "$region" ] && region="$culture"
 
   if [ -n "$region" ] && [[ "${region,,}" != "en-us" ]]; then
-    sed -i "s/<UserLocale>en-US<\/UserLocale>/<UserLocale>$region<\/UserLocale>/g" "$asset"
-    sed -i "s/<SystemLocale>en-US<\/SystemLocale>/<SystemLocale>$region<\/SystemLocale>/g" "$asset"
+    value=$(escapeXMLSed "$region") || return 1
+    sed -i "s|<UserLocale>en-US</UserLocale>|<UserLocale>$value</UserLocale>|g" "$asset" || return 1
+    sed -i "s|<SystemLocale>en-US</SystemLocale>|<SystemLocale>$value</SystemLocale>|g" "$asset" || return 1
   fi
 
   keyboard="$KEYBOARD"
   [ -z "$keyboard" ] && keyboard="$culture"
 
   if [ -n "$keyboard" ] && [[ "${keyboard,,}" != "en-us" ]]; then
-    sed -i "s/<InputLocale>en-US<\/InputLocale>/<InputLocale>$keyboard<\/InputLocale>/g" "$asset"
-    sed -i "s/<InputLocale>0409:00000409<\/InputLocale>/<InputLocale>$keyboard<\/InputLocale>/g" "$asset"
+    value=$(escapeXMLSed "$keyboard") || return 1
+    sed -i "s|<InputLocale>en-US</InputLocale>|<InputLocale>$value</InputLocale>|g" "$asset" || return 1
+    sed -i "s|<InputLocale>0409:00000409</InputLocale>|<InputLocale>$value</InputLocale>|g" "$asset" || return 1
   fi
 
-  user=$(echo "$USERNAME" | sed 's/[^[:alnum:]@!._-]//g')
+  domain="$DOMAIN"
+  case "${DETECTED,,}" in
+    "win10x64"* | "win11x64"* ) ;;
+    * ) domain="" ;;
+  esac
 
-  if [ -n "$user" ]; then
-    sed -i "s/-name \"Docker\"/-name \"$user\"/g" "$asset"
-    sed -i "s/<Name>Docker<\/Name>/<Name>$user<\/Name>/g" "$asset"
-    sed -i "s/where name=\"Docker\"/where name=\"$user\"/g" "$asset"
-    sed -i "s/<FullName>Docker<\/FullName>/<FullName>$user<\/FullName>/g" "$asset"
-    sed -i "s/<Username>Docker<\/Username>/<Username>$user<\/Username>/g" "$asset"
+  if [ -n "$domain" ]; then
+
+    if [ -z "$USERNAME" ]; then
+      error "The USERNAME variable must be specified when joining a domain!"
+      return 1
+    fi
+
+    if [ -z "$PASSWORD" ]; then
+      error "The PASSWORD variable must be specified when joining a domain!"
+      return 1
+    fi
+
+    if [[ "$domain" == *"://"* ]]; then
+      error "The DOMAIN variable must contain a domain name, not a URL!"
+      return 1
+    fi
+
+    auth_user="$USERNAME"
+    qualifier=""
+
+    if [[ "$auth_user" == *\\* && "$auth_user" == *@* ]]; then
+      error "The USERNAME variable must use only one domain account format!"
+      return 1
+    fi
+
+    case "$auth_user" in
+      *\\* )
+        qualifier="${auth_user%%\\*}"
+        user="${auth_user#*\\}"
+
+        if [ -z "$qualifier" ] || [ -z "$user" ] || [[ "$user" == *\\* ]]; then
+          error "The USERNAME variable does not contain a valid domain account name!"
+          return 1
+        fi
+        ;;
+      *@* )
+        user="${auth_user%%@*}"
+        qualifier="${auth_user#*@}"
+
+        if [ -z "$user" ] || [ -z "$qualifier" ] || [[ "$qualifier" == *@* ]]; then
+          error "The USERNAME variable does not contain a valid domain account name!"
+          return 1
+        fi
+        ;;
+      * )
+        user="$auth_user"
+        ;;
+    esac
+
+    if [[ "${user^^}" == "NONE" ]]; then
+      error "The USERNAME value \"NONE\" is reserved by Windows!"
+      return 1
+    fi
+
+    if [[ "$user" =~ ^[.[:space:]]+$ ]]; then
+      error "The USERNAME variable cannot consist only of spaces or periods!"
+      return 1
+    fi
+
+    if [[ "${user,,}" == "docker" ]]; then
+      error "The USERNAME variable must be changed from its default value when joining a domain!"
+      return 1
+    fi
+
+    if [[ "$PASSWORD" == "admin" ]]; then
+      error "The PASSWORD variable must be changed from its default value when joining a domain!"
+      return 1
+    fi
+
+    safe_user=$(printf '%s' "$user" | tr -d '"/\\[]:;|=,+*?<>%@') || return 1
+
+    if [[ "$safe_user" != "$user" ]]; then
+      error "The domain account name contains characters that are not supported by Windows unattended setup!"
+      return 1
+    fi
+
+  else
+
+    raw_user="$USERNAME"
+    user=$(printf '%s' "$raw_user" | tr -d '"/\\[]:;|=,+*?<>%@') || return 1
+
+    if [[ "$user" != "$raw_user" ]]; then
+      warn "Unsupported characters were removed from the USERNAME value: \"$raw_user\" became \"$user\"."
+    fi
+
+    if [ -n "$raw_user" ] && [ -z "$user" ]; then
+      error "The USERNAME variable does not contain a valid local account name!"
+      return 1
+    fi
+
+    if [[ "${user^^}" == "NONE" ]]; then
+      error "The USERNAME value \"NONE\" is reserved by Windows!"
+      return 1
+    fi
+
+    if [[ "$user" =~ ^[.[:space:]]+$ ]]; then
+      error "The USERNAME variable cannot consist only of spaces or periods!"
+      return 1
+    fi
+
+    if [ -n "$user" ]; then
+      user_xml=$(escapeXMLSed "$user") || return 1
+
+      sed -i "s|-name \"Docker\"|-name \"\$env:USERNAME\"|g" "$asset" || return 1
+      sed -i 's|where name="Docker"|where name="%USERNAME%"|g' "$asset" || return 1
+      sed -i "s|<Name>Docker</Name>|<Name>$user_xml</Name>|g" "$asset" || return 1
+      sed -i "s|<FullName>Docker</FullName>|<FullName>$user_xml</FullName>|g" "$asset" || return 1
+      sed -i "s|<Username>Docker</Username>|<Username>$user_xml</Username>|g" "$asset" || return 1
+    fi
+
   fi
 
-  [ -n "$PASSWORD" ] && pass="$PASSWORD" || pass="admin"
+  if [ -n "$domain" ]; then
+    pass="admin"
+  else
+    [ -n "$PASSWORD" ] && pass="$PASSWORD" || pass="admin"
+  fi
 
-  pw=$(printf '%s' "${pass}Password" | iconv -f utf-8 -t utf-16le | base64 -w 0)
-  admin=$(printf '%s' "${pass}AdministratorPassword" | iconv -f utf-8 -t utf-16le | base64 -w 0)
+  pw=$(printf '%s' "${pass}Password" | iconv -f utf-8 -t utf-16le | base64 -w 0) || return 1
+  admin=$(printf '%s' "${pass}AdministratorPassword" | iconv -f utf-8 -t utf-16le | base64 -w 0) || return 1
 
-  sed -i "s|<Value>password<\/Value>|<Value>$admin<\/Value>|g" "$asset"
-  sed -i "s|<PlainText>true<\/PlainText>|<PlainText>false<\/PlainText>|g" "$asset"
-  sed -i -z "s|<Password>...........<Value \/>|<Password>\n          <Value>$pw<\/Value>|g" "$asset"
-  sed -i -z "s|<Password>...............<Value \/>|<Password>\n              <Value>$pw<\/Value>|g" "$asset"
-  sed -i -z "s|<AdministratorPassword>...........<Value \/>|<AdministratorPassword>\n          <Value>$admin<\/Value>|g" "$asset"
-  sed -i -z "s|<AdministratorPassword>...............<Value \/>|<AdministratorPassword>\n              <Value>$admin<\/Value>|g" "$asset"
+  sed -i "s|<Value>password</Value>|<Value>$admin</Value>|g" "$asset" || return 1
+  sed -i "s|<PlainText>true</PlainText>|<PlainText>false</PlainText>|g" "$asset" || return 1
+  sed -i -z -E "s|<Password>([[:space:]]*)<Value[[:space:]]*/>|<Password>\1<Value>$pw</Value>|g" "$asset" || return 1
+  sed -i -z -E "s|<AdministratorPassword>([[:space:]]*)<Value[[:space:]]*/>|<AdministratorPassword>\1<Value>$admin</Value>|g" "$asset" || return 1
+
+  if [ -n "$domain" ]; then
+
+    pw=$(printf '%s' "${PASSWORD}Password" | iconv -f utf-8 -t utf-16le | base64 -w 0) || return 1
+
+    if ! updateDomain "$asset" "$domain" "$user" "$auth_user" "$PASSWORD" "$pw"; then
+      error "Failed to add domain configuration to answer file!"
+      return 1
+    fi
+
+  fi
 
   if [ -n "$EDITION" ]; then
-    [[ "${EDITION^^}" == "CORE" ]] && EDITION="STANDARDCORE"
-    sed -i "s/SERVERSTANDARD<\/Value>/SERVER${EDITION^^}<\/Value>/g" "$asset"
+    case "${EDITION,,}" in
+      "core" ) edition="STANDARDCORE" ;;
+      * ) edition="${EDITION^^}" ;;
+    esac
+
+    edition=$(escapeXMLSed "$edition") || return 1
+    sed -i "s|SERVERSTANDARD</Value>|SERVER$edition</Value>|g" "$asset" || return 1
   fi
 
   if [ -n "$KEY" ]; then
-    sed -i '/<ProductKey>/,/<\/ProductKey>/d' "$asset"
-    sed -i "s/<\/UserData>/  <ProductKey>\n          <Key>${KEY}<\/Key>\n          <WillShowUI>OnError<\/WillShowUI>\n        <\/ProductKey>\n      <\/UserData>/g" "$asset"
+    key=$(escapeXMLSed "$KEY") || return 1
+    sed -i -E '/^[[:space:]]*<ProductKey>[[:space:]]*$/,/^[[:space:]]*<\/ProductKey>[[:space:]]*$/d' "$asset" || return 1
+    sed -i -E "s|<ProductKey>[^<]*</ProductKey>|<ProductKey>$key</ProductKey>|g" "$asset" || return 1
+    sed -i "s|</UserData>|  <ProductKey>\n          <Key>$key</Key>\n          <WillShowUI>OnError</WillShowUI>\n        </ProductKey>\n      </UserData>|g" "$asset" || return 1
+  fi
+
+  if ! xmllint --nonet --noout "$asset"; then
+    error "The generated answer file is not valid XML!"
+    return 1
   fi
 
   return 0
@@ -996,22 +1324,12 @@ addDrivers() {
 
   wimlib-imagex update "$file" "$index" --command "delete --force --recursive /$target" >/dev/null || true
 
-  addDriver "$version" "$drivers" "$target" "qxl" || return 1
-  addDriver "$version" "$drivers" "$target" "viofs" || return 1
-  addDriver "$version" "$drivers" "$target" "sriov" || return 1
-  addDriver "$version" "$drivers" "$target" "smbus" || return 1
-  addDriver "$version" "$drivers" "$target" "qxldod" || return 1
-  addDriver "$version" "$drivers" "$target" "viorng" || return 1
-  addDriver "$version" "$drivers" "$target" "viostor" || return 1
-  addDriver "$version" "$drivers" "$target" "viomem" || return 1
-  addDriver "$version" "$drivers" "$target" "NetKVM" || return 1
-  addDriver "$version" "$drivers" "$target" "Balloon" || return 1
-  addDriver "$version" "$drivers" "$target" "vioscsi" || return 1
-  addDriver "$version" "$drivers" "$target" "pvpanic" || return 1
-  addDriver "$version" "$drivers" "$target" "vioinput" || return 1
-  addDriver "$version" "$drivers" "$target" "viogpudo" || return 1
-  addDriver "$version" "$drivers" "$target" "vioserial" || return 1
-  addDriver "$version" "$drivers" "$target" "qemupciserial" || return 1
+  local driver
+  local driver_list=( qxl viofs sriov smbus qxldod viorng viostor viomem NetKVM Balloon vioscsi pvpanic vioinput viogpudo vioserial qemupciserial )
+
+  for driver in "${driver_list[@]}"; do
+    addDriver "$version" "$drivers" "$target" "$driver" || return 1
+  done
 
   local dst="$src/\$OEM\$/\$\$/Drivers"
   mkdir -p "$dst" || return 1
@@ -1038,44 +1356,51 @@ updateImage() {
   local asset="$2"
   local language="$3"
   local tmp="/tmp/install"
-  local file="autounattend.xml"
-  local org="${file//.xml/.org}"
-  local dat="${file//.xml/.dat}"
-  local desc path src wim xml index result
+  local xml="autounattend.xml"
+  local bak="${xml//.xml/.org}"
+  local dat="${xml//.xml/.dat}"
+  local desc path src wim name info idx
 
   skipVersion "${DETECTED,,}" && return 0
 
   if [ ! -s "$asset" ] || [ ! -f "$asset" ]; then
     asset=""
-    if [[ "$MANUAL" != [Yy1]* ]]; then
+    if ! enabled "$MANUAL"; then
       MANUAL="Y"
       warn "no answer file provided, $FB."
     fi
   fi
 
-  rm -rf "$tmp"
-  mkdir -p "$tmp"
+  rm -rf "$tmp" || return 1
+  mkdir -p "$tmp" || return 1
 
-  src=$(find "$dir" -maxdepth 1 -type d -iname sources -print -quit)
+  src=$(find "$dir" -maxdepth 1 -type d -iname sources -print -quit) || return 1
 
   if [ ! -d "$src" ]; then
-    error "failed to locate 'sources' folder in ISO image, $FB" && return 1
+    error "failed to locate 'sources' folder in ISO image, $FB"
+    return 1
   fi
 
-  wim=$(find "$src" -maxdepth 1 -type f \( -iname boot.wim -or -iname boot.esd \) -print -quit)
+  wim=$(find "$src" -maxdepth 1 -type f \( -iname boot.wim -or -iname boot.esd \) -print -quit) || return 1
 
   if [ ! -f "$wim" ]; then
-    error "failed to locate 'boot.wim' or 'boot.esd' in ISO image, $FB" && return 1
+    error "failed to locate 'boot.wim' or 'boot.esd' in ISO image, $FB"
+    return 1
   fi
 
-  index="1"
-  result=$(wimlib-imagex info -xml "$wim" | iconv -f UTF-16LE -t UTF-8)
+  idx="1"
 
-  if [[ "${result^^}" == *"<IMAGE INDEX=\"2\">"* ]]; then
-    index="2"
+  if ! info=$(wimlib-imagex info -xml "$wim" | iconv -f UTF-16LE -t UTF-8); then
+    warn "failed to read boot image information, $FB"
+    MANUAL="Y"
+    info=""
   fi
 
-  if ! addDrivers "$src" "$tmp" "$wim" "$index" "$DETECTED"; then
+  if [[ "${info^^}" == *"<IMAGE INDEX=\"2\">"* ]]; then
+    idx="2"
+  fi
+
+  if ! addDrivers "$src" "$tmp" "$wim" "$idx" "$DETECTED"; then
     error "Failed to add drivers to image!"
   fi
 
@@ -1083,59 +1408,91 @@ updateImage() {
     error "Failed to add OEM folder to image!"
   fi
 
-  if wimlib-imagex extract "$wim" "$index" "/$file" "--dest-dir=$tmp" >/dev/null 2>&1; then
-    if ! wimlib-imagex extract "$wim" "$index" "/$dat" "--dest-dir=$tmp" >/dev/null 2>&1; then
-      if ! wimlib-imagex extract "$wim" "$index" "/$org" "--dest-dir=$tmp" >/dev/null 2>&1; then
-        if ! wimlib-imagex update "$wim" "$index" --command "rename /$file /$org" > /dev/null; then
-          warn "failed to backup original answer file ($file)."
+  if wimlib-imagex extract "$wim" "$idx" "/$xml" "--dest-dir=$tmp" >/dev/null 2>&1; then
+    if ! wimlib-imagex extract "$wim" "$idx" "/$dat" "--dest-dir=$tmp" >/dev/null 2>&1; then
+      if ! wimlib-imagex extract "$wim" "$idx" "/$bak" "--dest-dir=$tmp" >/dev/null 2>&1; then
+        if ! wimlib-imagex update "$wim" "$idx" --command "rename /$xml /$bak" > /dev/null; then
+          warn "failed to backup original answer file ($xml)."
         fi
       fi
     fi
   fi
 
-  if [[ "$MANUAL" != [Yy1]* ]]; then
+  if ! enabled "$MANUAL"; then
 
-    xml=$(basename "$asset")
-    info "Adding $xml for automatic installation..."
+    name=$(basename "$asset") || return 1
+    local answer="$tmp/$name"
 
-    local answer="$tmp/$xml"
-    cp "$asset" "$answer"
-    updateXML "$answer" "$language"
+    info "Adding $name for automatic installation..."
 
-    if ! wimlib-imagex update "$wim" "$index" --command "add $answer /$file" > /dev/null; then
+    if ! cp "$asset" "$answer"; then
+      error "Failed to copy answer file to $answer."
+      return 1
+    fi
+
+    local fallback="/run/assets/${DETECTED%%-*}.xml"
+
+    if [[ "$DETECTED" != win20* &&
+          "$asset" == "$fallback" &&
+          "$asset" != "/run/assets/$DETECTED.xml" ]]; then
+
+      if ! sed -i \
+        -e '/<InstallFrom>.*<\/InstallFrom>/d' \
+        -e '/<ProductKey>.*<\/ProductKey>/d' \
+        -e '/<InstallFrom>/,/<\/InstallFrom>/d' \
+        -e '/<ProductKey>/,/<\/ProductKey>/d' \
+        "$answer"; then
+        error "Failed to make answer file edition-neutral: $answer"
+        return 1
+      fi
+
+    fi
+
+    if ! updateXML "$answer" "$language"; then
+      error "Failed to update answer file: $answer"
+      return 1
+    fi
+
+    if ! wimlib-imagex update "$wim" "$idx" --command "add $answer /$xml" > /dev/null; then
       MANUAL="Y"
-      warn "failed to add answer file ($xml) to ISO image, $FB"
+      warn "failed to add answer file ($name) to ISO image, $FB"
     else
-      wimlib-imagex update "$wim" "$index" --command "add $answer /$dat" > /dev/null || true
+      wimlib-imagex update "$wim" "$idx" --command "add $answer /$dat" > /dev/null || true
     fi
 
   fi
 
-  if [[ "$MANUAL" == [Yy1]* ]]; then
+  if enabled "$MANUAL"; then
 
-    wimlib-imagex update "$wim" "$index" --command "delete --force /$file" > /dev/null || true
+    wimlib-imagex update "$wim" "$idx" --command "delete --force /$xml" > /dev/null || true
 
-    if wimlib-imagex extract "$wim" "$index" "/$org" "--dest-dir=$tmp" >/dev/null 2>&1; then
-      if ! wimlib-imagex update "$wim" "$index" --command "add $tmp/$org /$file" > /dev/null; then
-        warn "failed to restore original answer file ($org)."
+    if wimlib-imagex extract "$wim" "$idx" "/$bak" "--dest-dir=$tmp" >/dev/null 2>&1; then
+      if ! wimlib-imagex update "$wim" "$idx" --command "add $tmp/$bak /$xml" > /dev/null; then
+        warn "failed to restore original answer file ($bak)."
       fi
     fi
 
   fi
 
-  local find="$file"
-  [[ "$MANUAL" == [Yy1]* ]] && find="$org"
-  path=$(find "$dir" -maxdepth 1 -type f -iname "$find" -print -quit)
+  name="$xml"
+  enabled "$MANUAL" && name="$bak"
+  path=$(find "$dir" -maxdepth 1 -type f -iname "$name" -print -quit) || return 1
 
   if [ -f "$path" ]; then
-    if [[ "$MANUAL" != [Yy1]* ]]; then
-      mv -f "$path" "${path%.*}.org"
+    if ! enabled "$MANUAL"; then
+      if ! mv -f "$path" "${path%.*}.org"; then
+        error "Failed to rename answer file: $path"
+        return 1
+      fi
     else
-      mv -f "$path" "${path%.*}.xml"
+      if ! mv -f "$path" "${path%.*}.xml"; then
+        error "Failed to rename answer file: $path"
+        return 1
+      fi
     fi
   fi
 
-  rm -rf "$tmp"
+  rm -rf "$tmp" || return 1
   return 0
 }
 
@@ -1157,7 +1514,7 @@ buildImage() {
   local failed=""
   local cat="BOOT.CAT"
   local log="/run/shm/iso.log"
-  local base size size_gb space space_gb desc
+  local base size desc
 
   if [ -f "$BOOT" ]; then
     error "File $BOOT does already exist?!" && return 1
@@ -1179,13 +1536,7 @@ buildImage() {
   fi
 
   size=$(du -b --max-depth=0 "$dir" | cut -f1)
-  size_gb=$(formatBytes "$size")
-  space=$(df --output=avail -B 1 "$TMP" | tail -n 1)
-  space_gb=$(formatBytes "$space")
-
-  if (( size > space )); then
-    error "Not enough free space in $STORAGE, have $space_gb available but need at least $size_gb." && return 1
-  fi
+  checkFreeSpace "$TMP" "$size" || return 1
 
   /run/progress.sh "$out" "$size" "$msg ([P])..." &
 
@@ -1223,57 +1574,31 @@ buildImage() {
   [[ "$err" != "$hide" ]] && echo "$err"
 
   mv -f "$out" "$BOOT" || return 1
-  ! setOwner "$BOOT" && error "Failed to set the owner for \"$BOOT\" !"
+
+  if ! setOwner "$BOOT"; then
+    warn "Failed to set the owner for \"$BOOT\" !"
+  fi
 
   return 0
 }
 
 bootWindows() {
 
-  if [ -f "$STORAGE/windows.args" ]; then
-    ARGS=$(<"$STORAGE/windows.args")
-    ARGS="${ARGS//[![:print:]]/}"
+  ARGS=$(readState "$STORAGE/windows.args") || return 1
+
+  if [ -n "$ARGS" ]; then
     ARGUMENTS="$ARGS ${ARGUMENTS:-}"
   fi
 
-  if [ -s "$STORAGE/windows.vga" ] && [ -f "$STORAGE/windows.vga" ]; then
-    if [ -z "${VGA:-}" ]; then
-      VGA=$(<"$STORAGE/windows.vga")
-      VGA="${VGA//[![:print:]]/}"
-    fi
-  fi
+  restoreState "VGA" "$STORAGE/windows.vga" || return 1
+  restoreState "USB" "$STORAGE/windows.usb" || return 1
+  restoreState "SOUND" "$STORAGE/windows.sound" || return 1
+  restoreState "ADAPTER" "$STORAGE/windows.net" || return 1
+  restoreState "DISK_TYPE" "$STORAGE/windows.type" || return 1
+  restoreState "BOOT_MODE" "$STORAGE/windows.mode" "Y" || return 1
 
-  if [ -s "$STORAGE/windows.usb" ] && [ -f "$STORAGE/windows.usb" ]; then
-    if [ -z "${USB:-}" ]; then
-      USB=$(<"$STORAGE/windows.usb")
-      USB="${USB//[![:print:]]/}"
-    fi
-  fi
-
-  if [ -s "$STORAGE/windows.net" ] && [ -f "$STORAGE/windows.net" ]; then
-    if [ -z "${ADAPTER:-}" ]; then
-      ADAPTER=$(<"$STORAGE/windows.net")
-      ADAPTER="${ADAPTER//[![:print:]]/}"
-    fi
-  fi
-
-  if [ -s "$STORAGE/windows.type" ] && [ -f "$STORAGE/windows.type" ]; then
-    if [ -z "${DISK_TYPE:-}" ]; then
-      DISK_TYPE=$(<"$STORAGE/windows.type")
-      DISK_TYPE="${DISK_TYPE//[![:print:]]/}"
-    fi
-  fi
-
-  if [ -s "$STORAGE/windows.mode" ] && [ -f "$STORAGE/windows.mode" ]; then
-    BOOT_MODE=$(<"$STORAGE/windows.mode")
-    BOOT_MODE="${BOOT_MODE//[![:print:]]/}"
-  fi
-
-  if [ -s "$STORAGE/windows.old" ] && [ -f "$STORAGE/windows.old" ]; then
-    if [[ "${PLATFORM,,}" == "x64" ]]; then
-      MACHINE=$(<"$STORAGE/windows.old")
-      MACHINE="${MACHINE//[![:print:]]/}"
-    fi
+  if [[ "${PLATFORM,,}" == "x64" ]]; then
+    restoreState "MACHINE" "$STORAGE/windows.old" "Y" || return 1
   fi
 
   return 0
@@ -1331,5 +1656,4 @@ if ! finishInstall "$BOOT" "N"; then
   exit 69
 fi
 
-html "Successfully prepared image for installation..."
 return 0

@@ -2,31 +2,41 @@
 set -Eeuo pipefail
 
 : "${KEY:=""}"
+: "${HOST:=""}"
 : "${WIDTH:=""}"
 : "${HEIGHT:=""}"
 : "${VERIFY:=""}"
+: "${DOMAIN:=""}"
 : "${REGION:=""}"
 : "${EDITION:=""}"
 : "${MANUAL:=""}"
 : "${REMOVE:=""}"
 : "${VERSION:=""}"
+: "${COMMAND:=""}"
 : "${DETECTED:=""}"
 : "${KEYBOARD:=""}"
 : "${LANGUAGE:=""}"
 : "${USERNAME:=""}"
 : "${PASSWORD:=""}"
 
+# Sanitize variables
+KEY=$(strip "$KEY")
+HOST=$(strip "$HOST")
+WIDTH=$(strip "$WIDTH")
+HEIGHT=$(strip "$HEIGHT")
+DOMAIN=$(strip "$DOMAIN")
+REGION=$(strip "$REGION")
+COMMAND=$(strip "$COMMAND")
+EDITION=$(strip "$EDITION")
+KEYBOARD=$(strip "$KEYBOARD")
+LANGUAGE=$(strip "$LANGUAGE")
+USERNAME=$(strip "$USERNAME")
+
 MIRRORS=4
 
 parseVersion() {
 
-  if [[ "${VERSION}" == \"*\" || "${VERSION}" == \'*\' ]]; then
-    VERSION="${VERSION:1:-1}"
-  fi
-
-  VERSION="${VERSION#"${VERSION%%[! ]*}"}"
-  VERSION="${VERSION%"${VERSION##*[! ]}"}"
-
+  VERSION=$(strip "$VERSION")
   [ -z "$VERSION" ] && VERSION="win11"
 
   case "${VERSION,,}" in
@@ -149,7 +159,7 @@ parseVersion() {
       VERSION="tiny11"
       [ -z "$DETECTED" ] && DETECTED="win11x64"
       ;;
-   "tiny10" | "tiny 10" )
+    "tiny10" | "tiny 10" )
       VERSION="tiny10"
       [ -z "$DETECTED" ] && DETECTED="win10x64-ltsc"
       ;;
@@ -695,8 +705,8 @@ getMido() {
 
   case "${id,,}" in
     "win11x64" )
-      size=8471603200
-      sum="768984706b909479417b2368438909440f2967ff05c6a9195ed2667254e465e3"
+      size=7736125440
+      sum="d141f6030fed50f75e2b03e1eb2e53646c4b21e5386047cb860af5223f102a32"
       url="https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26200.6584.250915-1905.25h2_ge_release_svc_refresh_CLIENT_CONSUMER_x64FRE_en-us.iso"
       ;;
     "win11x64-enterprise-eval" )
@@ -735,15 +745,15 @@ getMido() {
       url="https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_en-us.iso"
       ;;
     "win2019-eval" )
-      size=5652088832
-      sum="6dae072e7f78f4ccab74a45341de0d6e2d45c39be25f1f5920a2ab4f51d7bcbb"
+      size=5296713728
+      sum="549bca46c055157291be6c22a3aaaed8330e78ef4382c99ee82c896426a1cee1"
       url="https://software-download.microsoft.com/download/pr/17763.737.190906-2324.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_en-us_1.iso"
-     ;;
+      ;;
     "win2019-hv" )
-      size=3072712704
-      sum="48e9b944518e5bbc80876a9a7ff99716f386f404f4be48dca47e16a66ae7872c"
+      size=3022784512
+      sum="cb28984af65ba1085cd6ade5fdd3d9c75efe7618846513f9ad44f1397a409f85"
       url="https://software-download.microsoft.com/download/pr/17763.557.190612-0019.rs5_release_svc_refresh_SERVERHYPERCORE_OEM_x64FRE_en-us.ISO"
-     ;;
+      ;;
     "win2016-eval" )
       size=6972221440
       sum="1ce702a578a3cb1ac3d14873980838590f06d5b7101c5daaccbac9d73f1fb50f"
@@ -786,8 +796,8 @@ getLink1() {
 
   case "${id,,}" in
     "win11x64" | "win11x64-enterprise" | "win11x64-enterprise-eval" )
-      size=6898546688
-      sum="2618a56931b645a6f097082431994bd85ae80862518de389e382f35ebfd455be"
+      size=6927149056
+      sum="f5ffe9313eebc6299fba9e6eeb2971007264e6c6be013073a89b5ae9bd85bfb3"
       url="11/en-us_windows_11_25h2_x64.iso"
       ;;
     "win11x64-iot" | "win11x64-enterprise-iot" | "win11x64-enterprise-iot-eval" )
@@ -801,8 +811,8 @@ getLink1() {
       url="11/X23-81951_26100.1742.240906-0331.ge_release_svc_refresh_CLIENT_ENTERPRISES_OEM_x64FRE_en-us.iso"
       ;;
     "win10x64" | "win10x64-enterprise" | "win10x64-enterprise-eval" )
-      size=5767888896
-      sum="9dce12d73168debc697919a6bc4d8c6624b2175bbed01a2ca97edb7d93627319"
+      size=5723299840
+      sum="316f718f21fc9b386d81dadd62dc60268a1cfd65b184ac6a052875a454c3431b"
       url="10/en-us_windows_10_22h2_x64.iso"
       ;;
     "win10x64-iot" | "win10x64-enterprise-iot" | "win10x64-enterprise-iot-eval" )
@@ -1287,7 +1297,7 @@ isMido() {
   local lang="$2"
   local sum
 
-  [[ "${MIDO:-}" == [Nn]* ]] && return 1
+  disabled "${MIDO:-}" && return 1
 
   sum=$(getMido "$id" "en" "sum")
   [ -n "$sum" ] && return 0
@@ -1300,7 +1310,7 @@ isESD() {
   local id="$1"
   local lang="$2"
 
-  [[ "${ESD:-}" == [Nn]* ]] && return 1
+  disabled "${ESD:-}" && return 1
 
   case "${id,,}" in
     "win11${PLATFORM,,}" | "win10${PLATFORM,,}" )
@@ -1321,7 +1331,7 @@ validVersion() {
 
   local id="$1"
   local lang="$2"
-  local url
+  local url i=0
 
   isESD "$id" "$lang" && return 0
   isMido "$id" "$lang" && return 0
@@ -1336,26 +1346,212 @@ validVersion() {
   return 1
 }
 
+validateResolution() {
+
+  local name="$1"
+  local value="$2"
+  local minimum="$3"
+  local number
+
+  if [[ ! "$value" =~ ^[0-9]+$ ]] || [ "${#value}" -gt 5 ]; then
+    error "The $name variable must be between $minimum and 16384!"
+    return 1
+  fi
+
+  number=$((10#$value))
+
+  if [ "$number" -lt "$minimum" ] || [ "$number" -gt 16384 ]; then
+    error "The $name variable must be between $minimum and 16384!"
+    return 1
+  fi
+
+  return 0
+}
+
+validateProductKey() {
+
+  local value="$1"
+
+  [ -z "$value" ] && return 0
+
+  if [[ ! "$value" =~ ^[A-Za-z0-9]{5}(-[A-Za-z0-9]{5}){4}$ ]]; then
+    error "The KEY variable must contain a valid 25-character product key!"
+    return 1
+  fi
+
+  return 0
+}
+
+validateComputerName() {
+
+  local value="$1"
+
+  if [ -z "$value" ]; then
+    value="$APP"
+    HOST="$value"
+  fi
+
+  if [ "${#value}" -gt 15 ]; then
+    error "The HOST variable cannot contain more than 15 characters!"
+    return 1
+  fi
+
+  if [[ ! "$value" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]]; then
+    error "The HOST variable may only contain letters, digits, and hyphens, and cannot start or end with a hyphen!"
+    return 1
+  fi
+
+  if [[ "$value" =~ ^[0-9]+$ ]]; then
+    error "The HOST variable cannot contain only digits!"
+    return 1
+  fi
+
+  return 0
+}
+
+validateLegacyText() {
+
+  local name="$1"
+  local value="$2"
+  local desc="${3:-}"
+  local suffix=""
+
+  [ -n "$desc" ] && suffix=" for $desc"
+
+  if [[ "$value" =~ [[:cntrl:]] ]]; then
+    error "The $name variable cannot contain control characters$suffix!"
+    return 1
+  fi
+
+  if [[ "$value" == *'"'* ]]; then
+    error "The $name variable cannot contain double quotes$suffix!"
+    return 1
+  fi
+
+  return 0
+}
+
+validateLegacyUsername() {
+
+  local value="$1"
+  local desc="${2:-}"
+  local suffix=""
+
+  [ -n "$desc" ] && suffix=" for $desc"
+
+  if [ -z "$value" ]; then
+    error "The USERNAME variable cannot be empty$suffix!"
+    return 1
+  fi
+
+  if [ "${#value}" -gt 20 ]; then
+    error "The USERNAME variable cannot contain more than 20 characters$suffix!"
+    return 1
+  fi
+
+  if [[ "$value" =~ [[:cntrl:]] ]]; then
+    error "The USERNAME variable cannot contain control characters$suffix!"
+    return 1
+  fi
+
+  case "$value" in
+    *'"'* | *'/'* | *\\* | *'['* | *']'* | *':'* | *';'* | *'|'* | *'='* | *','* | *'+'* | *'*'* | *'?'* | *'<'* | *'>'* )
+      error "The USERNAME variable contains unsupported characters$suffix!"
+      return 1 ;;
+  esac
+
+  if [[ "$value" == *"." ]]; then
+    error "The USERNAME variable cannot end with a period$suffix!"
+    return 1
+  fi
+
+  if [[ "$value" =~ ^[.[:space:]]+$ ]]; then
+    error "The USERNAME variable cannot consist only of spaces or periods$suffix!"
+    return 1
+  fi
+
+  return 0
+}
+
+validatePassword() {
+
+  local value="$1"
+  local desc="${2:-}"
+  local suffix=""
+
+  [ -n "$desc" ] && suffix=" for $desc"
+
+  if [ "${#value}" -gt 127 ]; then
+    error "The PASSWORD variable cannot contain more than 127 characters$suffix!"
+    return 1
+  fi
+
+  if [[ "$value" =~ [[:cntrl:]] ]]; then
+    error "The PASSWORD variable cannot contain control characters$suffix!"
+    return 1
+  fi
+
+  return 0
+}
+
+escapeSIFValue() {
+
+  local s="$1"
+
+  s=${s//%/%%}
+  s=${s//\"/\"\"}
+
+  printf '%s' "$s"
+  return 0
+}
+
+escapeRegistryValue() {
+
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
 addFolder() {
 
   local src="$1"
-  local folder="/oem"
+  local folder="/oem" file=""
+  local dest="$src/\$OEM\$/\$1/OEM"
 
   [ ! -d "$folder" ] && folder="/OEM"
   [ ! -d "$folder" ] && folder="$STORAGE/oem"
   [ ! -d "$folder" ] && folder="$STORAGE/OEM"
-  [ ! -d "$folder" ] && return 0
+  [ ! -d "$folder" ] && folder=""
 
-  local msg="Adding OEM folder to image..."
+  [ -z "$folder" ] && [ -z "$COMMAND" ] && return 0
+
+  local msg="Adding OEM files to image..."
   info "$msg" && html "$msg"
 
-  local dest="$src/\$OEM\$/\$1/OEM"
   mkdir -p "$dest" || return 1
-  cp -Lr "$folder/." "$dest" || return 1
 
-  local file
-  file=$(find "$dest" -maxdepth 1 -type f -iname install.bat  -print -quit)
-  [ -f "$file" ] && unix2dos -q "$file"
+  if [ -n "$folder" ]; then
+    cp -Lr "$folder/." "$dest" || return 1
+  fi
+
+  file=$(find "$dest" -maxdepth 1 -type f -iname install.bat -print -quit) || return 1
+
+  if [ -n "$COMMAND" ]; then
+
+    [ -z "$file" ] && file="$dest/install.bat"
+
+    if [ -s "$file" ]; then
+      printf '\n' >> "$file" || return 1
+    fi
+
+    printf '%s\n' "$COMMAND" >> "$file" || return 1
+
+  fi
+
+  if [ -f "$file" ]; then
+    if ! unix2dos -q "$file"; then
+      error "Failed to convert $file to DOS format!"
+      return 1
+    fi
+  fi
 
   return 0
 }
@@ -1388,8 +1584,8 @@ prepareInstall() {
     local msg="Adding drivers to image..."
     info "$msg" && html "$msg"
 
-    rm -rf "$drivers"
-    mkdir -p "$drivers"
+    rm -rf "$drivers" || return 1
+    mkdir -p "$drivers" || return 1
 
     if ! bsdtar -xf /var/drivers.txz -C "$drivers"; then
       error "Failed to extract drivers!" && return 1
@@ -1415,19 +1611,18 @@ prepareInstall() {
     cp -L "$drivers/NetKVM/$driver/$arch/netkvm.inf" "$dir/\$OEM\$/\$1/Drivers/NetKVM" || return 1
     cp -L "$drivers/NetKVM/$driver/$arch/netkvm.sys" "$dir/\$OEM\$/\$1/Drivers/NetKVM" || return 1
 
-    file=$(find "$target" -maxdepth 1 -type f -iname TXTSETUP.SIF -print -quit)
+    file=$(find "$target" -maxdepth 1 -type f -iname TXTSETUP.SIF -print -quit) || return 1
 
     if [ -z "$file" ]; then
       error "The file TXTSETUP.SIF could not be found!" && return 1
     fi
 
-    sed -i '/^\[SCSI.Load\]/s/$/\nviostor=viostor.sys,4/' "$file"
-    sed -i '/^\[SourceDisksFiles.'"$arch"'\]/s/$/\nviostor.sys=1,,,,,,4_,4,1,,,1,4/' "$file"
-    sed -i '/^\[SCSI\]/s/$/\nviostor=\"Red Hat VirtIO SCSI Disk Device\"/' "$file"
-    sed -i '/^\[HardwareIdsDatabase\]/s/$/\nPCI\\VEN_1AF4\&DEV_1001\&SUBSYS_00000000=\"viostor\"/' "$file"
-    sed -i '/^\[HardwareIdsDatabase\]/s/$/\nPCI\\VEN_1AF4\&DEV_1001\&SUBSYS_00020000=\"viostor\"/' "$file"
-    sed -i '/^\[HardwareIdsDatabase\]/s/$/\nPCI\\VEN_1AF4\&DEV_1001\&SUBSYS_00021AF4=\"viostor\"/' "$file"
-    sed -i '/^\[HardwareIdsDatabase\]/s/$/\nPCI\\VEN_1AF4\&DEV_1001\&SUBSYS_00000000=\"viostor\"/' "$file"
+    sed -i '/^\[SCSI.Load\]/s/$/\nviostor=viostor.sys,4/' "$file" || return 1
+    sed -i '/^\[SourceDisksFiles.'"$arch"'\]/s/$/\nviostor.sys=1,,,,,,4_,4,1,,,1,4/' "$file" || return 1
+    sed -i '/^\[SCSI\]/s/$/\nviostor=\"Red Hat VirtIO SCSI Disk Device\"/' "$file" || return 1
+    sed -i '/^\[HardwareIdsDatabase\]/s/$/\nPCI\\VEN_1AF4\&DEV_1001\&SUBSYS_00000000=\"viostor\"/' "$file" || return 1
+    sed -i '/^\[HardwareIdsDatabase\]/s/$/\nPCI\\VEN_1AF4\&DEV_1001\&SUBSYS_00020000=\"viostor\"/' "$file" || return 1
+    sed -i '/^\[HardwareIdsDatabase\]/s/$/\nPCI\\VEN_1AF4\&DEV_1001\&SUBSYS_00021AF4=\"viostor\"/' "$file" || return 1
 
     if [ ! -d "$drivers/sata/xp/$arch" ]; then
       error "Failed to locate required SATA drivers!" && return 1
@@ -1437,32 +1632,32 @@ prepareInstall() {
     cp -Lr "$drivers/sata/xp/$arch/." "$dir/\$OEM\$/\$1/Drivers/sata" || return 1
     cp -Lr "$drivers/sata/xp/$arch/." "$target" || return 1
 
-    sed -i '/^\[SCSI.Load\]/s/$/\niaStor=iaStor.sys,4/' "$file"
-    sed -i '/^\[FileFlags\]/s/$/\niaStor.sys = 16/' "$file"
-    sed -i '/^\[SourceDisksFiles.'"$arch"'\]/s/$/\niaStor.cat = 1,,,,,,,1,0,0/' "$file"
-    sed -i '/^\[SourceDisksFiles.'"$arch"'\]/s/$/\niaStor.inf = 1,,,,,,,1,0,0/' "$file"
-    sed -i '/^\[SourceDisksFiles.'"$arch"'\]/s/$/\niaStor.sys = 1,,,,,,4_,4,1,,,1,4/' "$file"
-    sed -i '/^\[SourceDisksFiles.'"$arch"'\]/s/$/\niaStor.sys = 1,,,,,,,1,0,0/' "$file"
-    sed -i '/^\[SourceDisksFiles.'"$arch"'\]/s/$/\niaahci.cat = 1,,,,,,,1,0,0/' "$file"
-    sed -i '/^\[SourceDisksFiles.'"$arch"'\]/s/$/\niaAHCI.inf = 1,,,,,,,1,0,0/' "$file"
-    sed -i '/^\[SCSI\]/s/$/\niaStor=\"Intel\(R\) SATA RAID\/AHCI Controller\"/' "$file"
-    sed -i '/^\[HardwareIdsDatabase\]/s/$/\nPCI\\VEN_8086\&DEV_2922\&CC_0106=\"iaStor\"/' "$file"
+    sed -i '/^\[SCSI.Load\]/s/$/\niaStor=iaStor.sys,4/' "$file" || return 1
+    sed -i '/^\[FileFlags\]/s/$/\niaStor.sys = 16/' "$file" || return 1
+    sed -i '/^\[SourceDisksFiles.'"$arch"'\]/s/$/\niaStor.cat = 1,,,,,,,1,0,0/' "$file" || return 1
+    sed -i '/^\[SourceDisksFiles.'"$arch"'\]/s/$/\niaStor.inf = 1,,,,,,,1,0,0/' "$file" || return 1
+    sed -i '/^\[SourceDisksFiles.'"$arch"'\]/s/$/\niaStor.sys = 1,,,,,,4_,4,1,,,1,4/' "$file" || return 1
+    sed -i '/^\[SourceDisksFiles.'"$arch"'\]/s/$/\niaStor.sys = 1,,,,,,,1,0,0/' "$file" || return 1
+    sed -i '/^\[SourceDisksFiles.'"$arch"'\]/s/$/\niaahci.cat = 1,,,,,,,1,0,0/' "$file" || return 1
+    sed -i '/^\[SourceDisksFiles.'"$arch"'\]/s/$/\niaAHCI.inf = 1,,,,,,,1,0,0/' "$file" || return 1
+    sed -i '/^\[SCSI\]/s/$/\niaStor=\"Intel\(R\) SATA RAID\/AHCI Controller\"/' "$file" || return 1
+    sed -i '/^\[HardwareIdsDatabase\]/s/$/\nPCI\\VEN_8086\&DEV_2922\&CC_0106=\"iaStor\"/' "$file" || return 1
 
-    rm -rf "$drivers"
+    rm -rf "$drivers" || return 1
 
   fi
 
   local key setup
-  setup=$(find "$target" -maxdepth 1 -type f -iname setupp.ini -print -quit)
+  setup=$(find "$target" -maxdepth 1 -type f -iname setupp.ini -print -quit) || return 1
 
   if [ -n "$setup" ] && [ -z "$KEY" ]; then
 
-    pid=$(<"$setup")
+    pid=$(<"$setup") || return 1
     pid="${pid%$'\r'}"
 
     if [[ "$driver" == "2k" ]]; then
 
-      echo "${pid:0:$((${#pid})) - 3}270" > "$setup"
+      echo "${pid:0:$((${#pid})) - 3}270" > "$setup" || return 1
 
     else
 
@@ -1472,21 +1667,21 @@ prepareInstall() {
 
       else
 
-        file=$(find "$target" -maxdepth 1 -type f -iname PID.INF -print -quit)
+        file=$(find "$target" -maxdepth 1 -type f -iname PID.INF -print -quit) || return 1
 
         if [ -n "$file" ]; then
 
           if [[ "$driver" == "2k3" ]]; then
 
-            key=$(grep -i -A 2 "StagingKey" "$file" | tail -n 2 | head -n 1)
+            key=$(grep -i -A 2 "StagingKey" "$file" | tail -n 2 | head -n 1) || key=""
 
           else
 
             key="${pid:$((${#pid})) - 8:5}"
             if [[ "${pid^^}" == *"OEM" ]]; then
-              key=$(grep -i -A 2 "$key" "$file" | tail -n 2 | head -n 1)
+              key=$(grep -i -A 2 "$key" "$file" | tail -n 2 | head -n 1) || key=""
             else
-              key=$(grep -i -m 1 -A 2 "$key" "$file" | tail -n 2 | head -n 1)
+              key=$(grep -i -m 1 -A 2 "$key" "$file" | tail -n 2 | head -n 1) || key=""
             fi
             key="${key#*= }"
 
@@ -1524,7 +1719,7 @@ prepareInstall() {
 
           esac
 
-          echo "${pid:0:$((${#pid})) - 3}000" > "$setup"
+          echo "${pid:0:$((${#pid})) - 3}000" > "$setup" || return 1
 
         fi
 
@@ -1533,9 +1728,12 @@ prepareInstall() {
 
   fi
 
-  [ -n "$KEY" ] && KEY="ProductID=$KEY"
+  validateProductKey "$KEY" || return 1
 
-  mkdir -p "$dir/\$OEM\$"
+  local product=""
+  [ -n "$KEY" ] && product="ProductID=$KEY"
+
+  mkdir -p "$dir/\$OEM\$" || return 1
 
   if ! addFolder "$dir"; then
     error "Failed to add OEM folder to image!" && return 1
@@ -1548,19 +1746,31 @@ prepareInstall() {
   [ -z "$WIDTH" ] && WIDTH="1280"
   [ -z "$HEIGHT" ] && HEIGHT="720"
 
-  XHEX=$(printf '%08x\n' "$WIDTH")
-  YHEX=$(printf '%08x\n' "$HEIGHT")
+  validateResolution "WIDTH" "$WIDTH" 320 || return 1
+  validateResolution "HEIGHT" "$HEIGHT" 200 || return 1
+  validateComputerName "$HOST" || return 1
+  validateLegacyText "APP" "$APP" "$desc" || return 1
+  validateLegacyText "ENGINE" "$ENGINE" "$desc" || return 1
 
-  local username=""
-  local password=""
+  XHEX=$(printf '%08x\n' "$((10#$WIDTH))") || return 1
+  YHEX=$(printf '%08x\n' "$((10#$HEIGHT))") || return 1
 
-  [ -n "$USERNAME" ] && username=$(echo "$USERNAME" | sed 's/[^[:alnum:]@!._-]//g')
-  [ -z "$username" ] && username="Docker"
+  local username="${USERNAME:-Docker}"
+  local password="${PASSWORD:-admin}"
+  local sifHost sifUsername sifPassword sifOrganization
+  local regUsername regPassword
 
-  [ -n "$PASSWORD" ] && password=$(echo "$PASSWORD" | sed 's/"//g')
-  [ -z "$password" ] && password="admin"
+  validateLegacyUsername "$username" "$desc" || return 1
+  validateLegacyPassword "$password" "$desc" || return 1
 
-  find "$target" -maxdepth 1 -type f -iname winnt.sif -exec rm {} \;
+  sifHost=$(escapeSIFValue "$HOST") || return 1
+  sifUsername=$(escapeSIFValue "$username") || return 1
+  sifPassword=$(escapeSIFValue "$password") || return 1
+  sifOrganization=$(escapeSIFValue "$APP for $ENGINE") || return 1
+  regUsername=$(escapeRegistryValue "$username") || return 1
+  regPassword=$(escapeRegistryValue "$password") || return 1
+
+  find "$target" -maxdepth 1 -type f -iname winnt.sif -delete || return 1
 
   {       echo "[Data]"
           echo "    AutoPartition=1"
@@ -1588,16 +1798,16 @@ prepareInstall() {
           echo "[GuiUnattended]"
           echo "    OEMSkipRegional=1"
           echo "    OemSkipWelcome=1"
-          echo "    AdminPassword=$password"
+          echo "    AdminPassword=\"$sifPassword\""
           echo "    TimeZone=0"
           echo "    AutoLogon=Yes"
           echo "    AutoLogonCount=65432"
           echo ""
           echo "[UserData]"
-          echo "    FullName=\"$username\""
-          echo "    ComputerName=\"*\""
-          echo "    OrgName=\"$APP for $ENGINE\""
-          echo "    $KEY"
+          echo "    FullName=\"$sifUsername\""
+          echo "    ComputerName=\"$sifHost\""
+          echo "    OrgName=\"$sifOrganization\""
+          echo "    $product"
           echo ""
           echo "[Identification]"
           echo "    JoinWorkgroup = WORKGROUP"
@@ -1620,7 +1830,7 @@ prepareInstall() {
           echo "[TerminalServices]"
           echo "    AllowConnections=1"
           echo ""
-  } | unix2dos > "$target/WINNT.SIF"
+  } | unix2dos > "$target/WINNT.SIF" || return 1
 
   if [[ "$driver" == "2k3" ]]; then
     {       echo "[Components]"
@@ -1630,7 +1840,7 @@ prepareInstall() {
             echo "    AutoMode=PerServer"
             echo "    AutoUsers=5"
             echo ""
-    } | unix2dos >> "$target/WINNT.SIF"
+    } | unix2dos >> "$target/WINNT.SIF" || return 1
   fi
 
   {       echo "Windows Registry Editor Version 5.00"
@@ -1662,8 +1872,8 @@ prepareInstall() {
           echo ""
           echo "[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon]"
           echo "\"AutoAdminLogon\"=\"1\""
-          echo "\"DefaultUserName\"=\"$username\""
-          echo "\"DefaultPassword\"=\"$password\""
+          echo "\"DefaultUserName\"=\"$regUsername\""
+          echo "\"DefaultPassword\"=\"$regPassword\""
           echo "\"DefaultDomainName\"=\"Dockur\""
           echo ""
           echo "[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Video\{23A77BF7-ED96-40EC-AF06-9B1F4867732A}\0000]"
@@ -1681,13 +1891,13 @@ prepareInstall() {
           echo "\"ScreenSaverOff\"=\"reg add \\\"HKCU\\\\Control Panel\\\\Desktop\\\" /f /v \\\"ScreenSaveActive\\\" /t REG_SZ /d \\\"0\\\"\""
           echo "$oem"
           echo ""
-  } | unix2dos > "$dir/\$OEM\$/install.reg"
+  } | unix2dos > "$dir/\$OEM\$/install.reg" || return 1
 
   if [[ "$driver" == "2k" ]]; then
     {       echo "[HKEY_USERS\.DEFAULT\Software\Microsoft\Windows\CurrentVersion\Runonce]"
             echo "\"^SetupICWDesktop\"=-"
             echo ""
-    } | unix2dos >> "$dir/\$OEM\$/install.reg"
+    } | unix2dos >> "$dir/\$OEM\$/install.reg" || return 1
   fi
 
   if [[ "$driver" == "2k3" ]]; then
@@ -1697,7 +1907,7 @@ prepareInstall() {
             echo "[HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\ServerOOBE\SecurityOOBE]"
             echo "\"DontLaunchSecurityOOBE\"=dword:00000000"
             echo ""
-    } | unix2dos >> "$dir/\$OEM\$/install.reg"
+    } | unix2dos >> "$dir/\$OEM\$/install.reg" || return 1
   fi
 
   {       echo "Set WshShell = WScript.CreateObject(\"WScript.Shell\")"
@@ -1749,13 +1959,13 @@ prepareInstall() {
           echo "End With"
           echo "Set oLink = Nothing"
           echo ""
-  } | unix2dos > "$dir/\$OEM\$/install.vbs"
+  } | unix2dos > "$dir/\$OEM\$/install.vbs" || return 1
 
   {       echo "[COMMANDS]"
           echo "\"REGEDIT /s install.reg\""
           echo "\"Wscript install.vbs\""
           echo ""
-  } | unix2dos > "$dir/\$OEM\$/cmdlines.txt"
+  } | unix2dos > "$dir/\$OEM\$/cmdlines.txt" || return 1
 
   return 0
 }
@@ -1766,23 +1976,39 @@ prepareLegacy() {
   local dir="$2"
   local desc="$3"
 
+  local tmp="$TMP/boot-images"
+  local image="$tmp/eltorito_img1_bios.img"
+
   ETFS="boot.img"
 
-  [ -f "$dir/$ETFS" ] && [ -s "$dir/$ETFS" ] && return 0
-  rm -f "$dir/$ETFS"
+  [ -s "$dir/$ETFS" ] && return 0
+  rm -f "$dir/$ETFS" || return 1
+  rm -rf "$tmp" || return 1
 
-  local len offset
-  len=$(isoinfo -d -i "$iso" | grep "Nsect " | grep -o "[^ ]*$")
-  offset=$(isoinfo -d -i "$iso" | grep "Bootoff " | grep -o "[^ ]*$")
-
-  if ! dd "if=$iso" "of=$dir/$ETFS" bs=2048 "count=$len" "skip=$offset" status=none; then
-    error "Failed to extract boot image from $desc ISO!" && return 1
+  if ! LC_ALL=C xorriso \
+      -no_rc \
+      -osirrox on \
+      -indev "$iso" \
+      -extract_boot_images "$tmp" >/dev/null 2>&1; then
+    rm -rf "$tmp" || true
+    error "Failed to extract boot image from $desc ISO!"
+    return 1
   fi
 
-  [ -f "$dir/$ETFS" ] && [ -s "$dir/$ETFS" ] && return 0
+  if [ ! -s "$image" ]; then
+    rm -rf "$tmp" || true
+    error "Failed to locate BIOS boot image in $desc ISO!"
+    return 1
+  fi
 
-  error "Failed to locate file \"$ETFS\" in $desc ISO image!"
-  return 1
+  if ! mv -f "$image" "$dir/$ETFS"; then
+    rm -rf "$tmp" || true
+    error "Failed to save boot image from $desc ISO!"
+    return 1
+  fi
+
+  rm -rf "$tmp" || return 1
+  return 0
 }
 
 detectLegacy() {
@@ -1902,7 +2128,8 @@ setMachine() {
       [ -z "${ADAPTER:-}" ] && ADAPTER="rtl8139" ;;
     "winxp"* | "win2003"* )
       DISK_TYPE="blk"
-      BOOT_MODE="windows_legacy" ;;
+      BOOT_MODE="windows_legacy"
+      [ -z "${SOUND:-}" ] && SOUND="usb-audio" ;;
     "winvista"* | "win7"* | "win2008"* )
       BOOT_MODE="windows_legacy" ;;
   esac
